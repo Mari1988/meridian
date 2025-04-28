@@ -388,5 +388,102 @@ class OrganicRfTensorsTest(tf.test.TestCase, parameterized.TestCase):
     )
 
 
+# pylint: disable=protected-access
+class AggregateSpendByChannelTest(tf.test.TestCase):
+  """Tests for the _aggregate_spend_by_channel function."""
+
+  def test_basic_aggregation_no_calibration(self):
+    """Tests aggregation without a calibration period."""
+    # Shape: (n_geos=2, n_times=3, n_channels=2)
+    spend_tensor = tf.constant(
+        [
+            [[10, 100], [20, 200], [30, 300]],  # Geo 0
+            [[40, 400], [50, 500], [60, 600]],
+        ],  # Geo 1
+        dtype=tf.float32,
+    )
+
+    aggregated_spend = media._aggregate_spend_by_channel(spend_tensor)
+
+    # Expected shape: (n_channels=2,)
+    self.assertEqual(aggregated_spend.shape, (2,))
+
+    # Expected values:
+    # Channel 0: 10 + 20 + 30 + 40 + 50 + 60 = 210
+    # Channel 1: 100 + 200 + 300 + 400 + 500 + 600 = 2100
+    expected_result = tf.constant([210, 2100], dtype=tf.float32)
+    self.assertAllClose(aggregated_spend, expected_result)
+
+  def test_aggregation_with_calibration(self):
+    """Tests aggregation with a calibration period."""
+    # Shape: (n_geos=2, n_times=3, n_channels=2)
+    spend_tensor = tf.constant(
+        [
+            [[10, 100], [20, 200], [30, 300]],  # Geo 0
+            [[40, 400], [50, 500], [60, 600]],
+        ],  # Geo 1
+        dtype=tf.float32,
+    )
+    # Shape: (n_times=3, n_channels=2)
+    # Use times: T0 for C0, T1 for C1, T2 for C0
+    calibration_period = tf.constant(
+        [
+            [True, False],  # Time 0: Use Ch 0, Don't use Ch 1
+            [False, True],  # Time 1: Don't use Ch 0, Use Ch 1
+            [True, False],
+        ],  # Time 2: Use Ch 0, Don't use Ch 1
+        dtype=tf.bool,
+    )
+
+    aggregated_spend = media._aggregate_spend_by_channel(
+        spend_tensor, calibration_period
+    )
+
+    # Expected shape: (n_channels=2,)
+    self.assertEqual(aggregated_spend.shape, (2,))
+
+    # Expected values:
+    # Channel 0: Use T0 & T2 -> (10 + 40) + (30 + 60) = 50 + 90 = 140
+    # Channel 1: Use T1      -> (200 + 500) = 700
+    expected_result = tf.constant([140, 700], dtype=tf.float32)
+    self.assertAllClose(aggregated_spend, expected_result)
+
+  def test_calibration_period_shape_handling(self):
+    """Tests aggregation when calibration period has more time steps."""
+    # Shape: (n_geos=2, n_times=3, n_channels=2)
+    spend_tensor = tf.constant(
+        [
+            [[10, 100], [20, 200], [30, 300]],  # Geo 0
+            [[40, 400], [50, 500], [60, 600]],
+        ],  # Geo 1
+        dtype=tf.float32,
+    )
+    # Shape: (n_media_times=5, n_channels=2) -> n_media_times > n_times
+    # Only the last 3 rows should be used for calculation
+    calibration_period_long = tf.constant(
+        [
+            [False, False],  # Ignored
+            [False, False],  # Ignored
+            [True, False],  # Corresponds to spend T0: Use Ch 0
+            [False, True],  # Corresponds to spend T1: Use Ch 1
+            [True, False],
+        ],  # Corresponds to spend T2: Use Ch 0
+        dtype=tf.bool,
+    )
+
+    aggregated_spend = media._aggregate_spend_by_channel(
+        spend_tensor, calibration_period_long
+    )
+
+    # Expected shape: (n_channels=2,)
+    self.assertEqual(aggregated_spend.shape, (2,))
+
+    # Expected values (same as test_aggregation_with_calibration):
+    # Channel 0: Use T0 & T2 -> (10 + 40) + (30 + 60) = 50 + 90 = 140
+    # Channel 1: Use T1      -> (200 + 500) = 700
+    expected_result = tf.constant([140, 700], dtype=tf.float32)
+    self.assertAllClose(aggregated_spend, expected_result)
+
+
 if __name__ == "__main__":
   absltest.main()

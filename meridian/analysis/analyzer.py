@@ -653,22 +653,16 @@ def _scale_tensors_by_multiplier(
     data: DataTensors,
     multiplier: float,
     by_reach: bool,
-    non_media_treatments_baseline: tf.Tensor | None = None,
 ) -> DataTensors:
   """Get scaled tensors for incremental outcome calculation.
 
   Args:
     data: DataTensors object containing the optional tensors to scale. Only
-      `media`, `reach`, `frequency`, `organic_media`, `organic_reach`,
-      `organic_frequency`, `non_media_treatments` are scaled. The other tensors
-      remain unchanged.
+      `media`, `reach`, `frequency`, `organic_media`, `organic_reach`, and
+      `organic_frequency` are scaled. The other tensors remain unchanged.
     multiplier: Float indicating the factor to scale tensors by.
     by_reach: Boolean indicating whether to scale reach or frequency when rf
       data is available.
-    non_media_treatments_baseline: Optional tensor to overwrite
-      `data.non_media_treatments` in the output. Used to compute the
-      conterfactual values for incremental outcome calculation. If not used, the
-      unmodified `data.non_media_treatments` tensor is returned in the output.
 
   Returns:
     A `DataTensors` object containing scaled tensor parameters. The original
@@ -697,14 +691,9 @@ def _scale_tensors_by_multiplier(
       incremented_data[constants.ORGANIC_FREQUENCY] = (
           data.organic_frequency * multiplier
       )
-  if non_media_treatments_baseline is not None:
-    incremented_data[constants.NON_MEDIA_TREATMENTS] = (
-        non_media_treatments_baseline
-    )
-  else:
-    incremented_data[constants.NON_MEDIA_TREATMENTS] = data.non_media_treatments
 
   # Include the original data that does not get scaled.
+  incremented_data[constants.NON_MEDIA_TREATMENTS] = data.non_media_treatments
   incremented_data[constants.MEDIA_SPEND] = data.media_spend
   incremented_data[constants.RF_SPEND] = data.rf_spend
   incremented_data[constants.CONTROLS] = data.controls
@@ -752,79 +741,6 @@ def _central_tendency_and_ci_by_prior_and_posterior(
   )
   xr_data = {metric_name: (xr_dims, metrics)}
   return xr.Dataset(data_vars=xr_data, coords=xr_coords)
-
-
-def _compute_non_media_baseline(
-    non_media_treatments: tf.Tensor,
-    non_media_baseline_values: Sequence[float | str] | None = None,
-    non_media_selected_times: Sequence[bool] | None = None,
-) -> tf.Tensor:
-  """Computes the baseline for each non-media treatment channel.
-
-  Args:
-    non_media_treatments: The non-media treatment input data.
-    non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-      Each element is either a float (which means that the fixed value will be
-      used as baseline for the given channel) or one of the strings "min" or
-      "max" (which mean that the global minimum or maximum value will be used as
-      baseline for the values of the given non_media treatment channel). If
-      None, the minimum value is used as baseline for each non_media treatment
-      channel.
-    non_media_selected_times: Optional list of shape (n_times,). Each element is
-      a boolean indicating whether the corresponding time period should be
-      included in the baseline computation.
-
-  Returns:
-    A tensor of shape (n_geos, n_times, n_non_media_channels) containing the
-    baseline values for each non-media treatment channel.
-  """
-
-  if non_media_selected_times is None:
-    non_media_selected_times = [True] * non_media_treatments.shape[-2]
-
-  if non_media_baseline_values is None:
-    # If non_media_baseline_values is not provided, use the minimum value for
-    # each non_media treatment channel as the baseline.
-    non_media_baseline_values_filled = [
-        constants.NON_MEDIA_BASELINE_MIN
-    ] * non_media_treatments.shape[-1]
-  else:
-    non_media_baseline_values_filled = non_media_baseline_values
-
-  if non_media_treatments.shape[-1] != len(non_media_baseline_values_filled):
-    raise ValueError(
-        "The number of non-media channels"
-        f" ({non_media_treatments.shape[-1]}) does not match the number"
-        f" of baseline types ({len(non_media_baseline_values_filled)})."
-    )
-
-  baseline_list = []
-  for channel in range(non_media_treatments.shape[-1]):
-    baseline_value = non_media_baseline_values_filled[channel]
-
-    if baseline_value == constants.NON_MEDIA_BASELINE_MIN:
-      baseline_for_channel = tf.reduce_min(
-          non_media_treatments[..., channel], axis=[0, 1]
-      )
-    elif baseline_value == constants.NON_MEDIA_BASELINE_MAX:
-      baseline_for_channel = tf.reduce_max(
-          non_media_treatments[..., channel], axis=[0, 1]
-      )
-    elif isinstance(baseline_value, float):
-      baseline_for_channel = tf.cast(baseline_value, tf.float32)
-    else:
-      raise ValueError(
-          f"Invalid non_media_baseline_values value: '{baseline_value}'. Only"
-          " float numbers and strings 'min' and 'max' are supported."
-      )
-
-    baseline_list.append(
-        baseline_for_channel
-        * tf.ones_like(non_media_treatments[..., channel])
-        * non_media_selected_times
-    )
-
-  return tf.stack(baseline_list, axis=-1)
 
 
 class Analyzer:
@@ -1594,7 +1510,7 @@ class Analyzer:
       self,
       data_tensors: DataTensors,
       dist_tensors: DistributionTensors,
-      non_media_baseline_values: Sequence[float | str] | None = None,
+      non_media_treatments_baseline_scaled: Sequence[float] | None = None,
   ) -> tf.Tensor:
     """Computes incremental KPI distribution.
 
@@ -1608,17 +1524,24 @@ class Analyzer:
       dist_tensors: A `DistributionTensors` container with the distribution
         tensors for media, RF, organic media, organic RF and non-media
         treatments channels.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the scaled values of the given non_media treatments
-        channel). If None, the minimum value is used as baseline for each
-        non_media treatments channel.
+      non_media_treatments_baseline_scaled: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float that will be used as
+        baseline for the given channel. The values are scaled by the
+        `Meridian.non_media_transformer`. Required if the data contains
+        non-media treatments.
 
     Returns:
       Tensor of incremental KPI distribution.
     """
+    if (
+        data_tensors.non_media_treatments is not None
+        and non_media_treatments_baseline_scaled is None
+    ):
+      raise ValueError(
+          "`non_media_treatments_baseline_scaled` must be passed to"
+          " `_get_incremental_kpi` when `non_media_treatments` data is"
+          " present."
+      )
     n_media_times = self._meridian.n_media_times
     if data_tensors.media is not None:
       n_times = data_tensors.media.shape[1]  # pytype: disable=attribute-error
@@ -1641,13 +1564,10 @@ class Analyzer:
         combined_beta,
     )
     if data_tensors.non_media_treatments is not None:
-      non_media_scaled_baseline = _compute_non_media_baseline(
-          non_media_treatments=data_tensors.non_media_treatments,
-          non_media_baseline_values=non_media_baseline_values,
-      )
       non_media_kpi = tf.einsum(
           "gtn,...gn->...gtn",
-          data_tensors.non_media_treatments - non_media_scaled_baseline,
+          data_tensors.non_media_treatments
+          - non_media_treatments_baseline_scaled,
           dist_tensors.gamma_gn,
       )
       return tf.concat([combined_media_kpi, non_media_kpi], axis=-1)
@@ -1697,7 +1617,7 @@ class Analyzer:
       self,
       data_tensors: DataTensors,
       dist_tensors: DistributionTensors,
-      non_media_baseline_values: Sequence[float | str] | None = None,
+      non_media_treatments_baseline_scaled: Sequence[float] | None = None,
       inverse_transform_outcome: bool | None = None,
       use_kpi: bool | None = None,
       selected_geos: Sequence[str] | None = None,
@@ -1726,16 +1646,14 @@ class Analyzer:
         T x n_non_media_channels), for any time dimension T. `revenue_per_kpi`:
         Contains revenue per kpi data with shape `(n_geos x T)`, for any time
         dimension `T`.
-     dist_tensors: A `DistributionTensors` container with the distribution
-       tensors for media, RF, organic media, organic RF and non-media treatments
-       channels.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the scaled values of the given non_media treatments
-        channel). If None, the minimum value is used as baseline for each
-        non_media treatments channel.
+      dist_tensors: A `DistributionTensors` container with the distribution
+        tensors for media, RF, organic media, organic RF and non-media
+        treatments channels.
+      non_media_treatments_baseline_scaled: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float that will be used as
+        baseline for the given channel. The values are scaled by the
+        `Meridian.non_media_transformer`. Required if the data contains
+        non-media treatments.
       inverse_transform_outcome: Boolean. If `True`, returns the expected
         outcome in the original KPI or revenue (depending on what is passed to
         `use_kpi`), as it was passed to `InputData`. If False, returns the
@@ -1760,10 +1678,20 @@ class Analyzer:
       Tensor containing the incremental outcome distribution.
     """
     self._check_revenue_data_exists(use_kpi)
+    if (
+        data_tensors.non_media_treatments is not None
+        and non_media_treatments_baseline_scaled is None
+    ):
+      raise ValueError(
+          "`non_media_treatments_baseline_scaled` must be passed to"
+          " `_incremental_outcome_impl` when `non_media_treatments` data is"
+          " present."
+      )
+
     transformed_outcome = self._get_incremental_kpi(
         data_tensors=data_tensors,
         dist_tensors=dist_tensors,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline_scaled=non_media_treatments_baseline_scaled,
     )
     if inverse_transform_outcome:
       incremental_outcome = self._inverse_outcome(
@@ -1787,7 +1715,7 @@ class Analyzer:
       self,
       use_posterior: bool = True,
       new_data: DataTensors | None = None,
-      non_media_baseline_values: Sequence[float | str] | None = None,
+      non_media_treatments_baseline: Sequence[float] | None = None,
       scaling_factor0: float = 0.0,
       scaling_factor1: float = 1.0,
       selected_geos: Sequence[str] | None = None,
@@ -1806,15 +1734,26 @@ class Analyzer:
     This calculates the media outcome of each media channel for each posterior
     or prior parameter draw. Incremental outcome is defined as:
 
-    `E(Outcome|Media_1, Controls)` minus `E(Outcome|Media_0, Controls)`
+    `E(Outcome|Treatment_1, Controls)` minus `E(Outcome|Treatment_0, Controls)`
 
-    Here, `Media_1` means that media execution for a given channel is multiplied
-    by `scaling_factor1` (1.0 by default) for the set of time periods specified
-    by `media_selected_times`. Similarly, `Media_0` means that media execution
-    is multiplied by `scaling_factor0` (0.0 by default) for these time periods.
+    For paid & organic channels (without reach and frequency data),
+    `Treatment_1`
+    means that media execution for a given channel is multiplied by
+    `scaling_factor1` (1.0 by default) for the set of time periods specified
+    by `media_selected_times`. Similarly, `Treatment_0` means that media
+    execution is multiplied by `scaling_factor0` (0.0 by default) for these time
+    periods.
 
-    For channels with reach and frequency data, either reach or frequency is
-    held fixed while the other is scaled, depending on the `by_reach` argument.
+    For paid & organic channels with reach and frequency data, either reach or
+    frequency is held fixed while the other is scaled, depending on the
+    `by_reach` argument.
+
+    For non-media treatments, `Treatment_1` means that the variable is set to
+    historical values. `Treatment_0` means that the variable is set to its
+    baseline value for all geos and time periods. Note that the scaling factors
+    (`scaling_factor0` and `scaling_factor1`) are not applicable to non-media
+    treatments.
+
     "Outcome" refers to either `revenue` if `use_kpi=False`, or `kpi` if
     `use_kpi=True`. When `revenue_per_kpi` is not defined, `use_kpi` cannot be
     False.
@@ -1856,13 +1795,15 @@ class Analyzer:
         any of the tensors in `new_data` is provided with a different number of
         time periods than in `InputData`, then all tensors must be provided with
         the same number of time periods.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the scaled values of the given non_media treatments
-        channel). If not provided, the minimum value is used as the baseline for
-        each non_media treatments channel.
+      non_media_treatments_baseline: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float denoting the fixed
+        value which will be used as baseline for the given channel. Incremental
+        outcome is the difference in expected outcome between (a) the
+        counterfactual where the non-media treatment is set to historical values
+        and (b) the counterfactual where the non-media treatment is set to its
+        baseline value for all geos and time periods. If `None`, the values
+        defined with `ModelSpec.non_media_treatments_baseline_values` will be
+        used.
       scaling_factor0: Float. The factor by which to scale the counterfactual
         scenario "Media_0" during the time periods specified in
         `media_selected_times`. Must be non-negative and less than
@@ -2002,7 +1943,6 @@ class Analyzer:
         media_selected_times = [
             x in media_selected_times for x in mmm.input_data.media_time
         ]
-    non_media_selected_times = media_selected_times[-mmm.n_times :]
 
     # Set counterfactual tensors based on the scaling factors and the media
     # selected times.
@@ -2014,28 +1954,50 @@ class Analyzer:
     )[:, None]
 
     if data_tensors.non_media_treatments is not None:
-      new_non_media_treatments0 = _compute_non_media_baseline(
-          non_media_treatments=data_tensors.non_media_treatments,
-          non_media_baseline_values=non_media_baseline_values,
-          non_media_selected_times=non_media_selected_times,
+      baseline = (
+          non_media_treatments_baseline
+          or self._meridian.non_media_treatments_baseline
+      )
+      non_media_treatments_baseline_scaled = self._meridian.non_media_transformer.forward(  # pytype: disable=attribute-error
+          baseline
+      )
+      non_media_treatments0 = tf.broadcast_to(
+          tf.constant(non_media_treatments_baseline_scaled, dtype=tf.float32)[
+              tf.newaxis, tf.newaxis, :
+          ],
+          data_tensors.non_media_treatments.shape,
       )
     else:
-      new_non_media_treatments0 = None
+      non_media_treatments_baseline_scaled = None
+      non_media_treatments0 = None
 
     incremented_data0 = _scale_tensors_by_multiplier(
         data=data_tensors,
         multiplier=counterfactual0,
         by_reach=by_reach,
-        non_media_treatments_baseline=new_non_media_treatments0,
     )
     incremented_data1 = _scale_tensors_by_multiplier(
         data=data_tensors, multiplier=counterfactual1, by_reach=by_reach
     )
 
-    data_tensors0 = self._get_scaled_data_tensors(
+    scaled_data0 = self._get_scaled_data_tensors(
         new_data=incremented_data0,
         include_non_paid_channels=include_non_paid_channels,
     )
+    # TODO: b/415198977 - Verify the computation of outcome of non-media
+    # treatments with `media_selected_times` and scale factors.
+
+    data_tensors0 = DataTensors(
+        media=scaled_data0.media,
+        reach=scaled_data0.reach,
+        frequency=scaled_data0.frequency,
+        organic_media=scaled_data0.organic_media,
+        organic_reach=scaled_data0.organic_reach,
+        organic_frequency=scaled_data0.organic_frequency,
+        revenue_per_kpi=scaled_data0.revenue_per_kpi,
+        non_media_treatments=non_media_treatments0,
+    )
+
     data_tensors1 = self._get_scaled_data_tensors(
         new_data=incremented_data1,
         include_non_paid_channels=include_non_paid_channels,
@@ -2062,7 +2024,9 @@ class Analyzer:
     incremental_outcome_kwargs = {
         "inverse_transform_outcome": inverse_transform_outcome,
         "use_kpi": use_kpi,
-        "non_media_baseline_values": non_media_baseline_values,
+        "non_media_treatments_baseline_scaled": (
+            non_media_treatments_baseline_scaled
+        ),
     }
     for i, start_index in enumerate(batch_starting_indices):
       stop_index = np.min([n_draws, start_index + batch_size])
@@ -2538,7 +2502,7 @@ class Analyzer:
       aggregate_geos: bool = False,
       aggregate_times: bool = False,
       split_by_holdout_id: bool = False,
-      non_media_baseline_values: Sequence[str | float] | None = None,
+      non_media_treatments_baseline: Sequence[float] | None = None,
       confidence_level: float = constants.DEFAULT_CONFIDENCE_LEVEL,
   ) -> xr.Dataset:
     """Calculates the data for the expected versus actual outcome over time.
@@ -2550,13 +2514,11 @@ class Analyzer:
         are summed over all of the time periods.
       split_by_holdout_id: Boolean. If `True` and `holdout_id` exists, the data
         is split into `'Train'`, `'Test'`, and `'All Data'` subsections.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the values of the given non_media treatment channel). If
-        None, the minimum value is used as baseline for each non_media treatment
-        channel.
+      non_media_treatments_baseline: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float denoting the fixed
+        value which will be used as baseline for the given channel. If `None`,
+        the values defined with `ModelSpec.non_media_treatments_baseline_values`
+        will be used.
       confidence_level: Confidence level for expected outcome credible
         intervals, represented as a value between zero and one. Default: `0.9`.
 
@@ -2582,7 +2544,7 @@ class Analyzer:
         aggregate_geos=False,
         aggregate_times=False,
         use_kpi=use_kpi,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline=non_media_treatments_baseline,
     )
     baseline = self._mean_and_ci_by_eval_set(
         baseline_expected_outcome,
@@ -2632,7 +2594,7 @@ class Analyzer:
 
   def _calculate_baseline_expected_outcome(
       self,
-      non_media_baseline_values: Sequence[str | float] | None = None,
+      non_media_treatments_baseline: Sequence[float] | None = None,
       **expected_outcome_kwargs,
   ) -> tf.Tensor:
     """Calculates either the posterior or prior expected outcome of baseline.
@@ -2644,20 +2606,18 @@ class Analyzer:
       3) `new_organic_media` is set to all zeros
       4) `new_organic_reach` is set to all zeros
       5) `new_non_media_treatments` is set to the counterfactual values
-      according to the
-        `non_media_baseline_values` argument
+      according to `non_media_treatments_baseline` or
+      `model.non_media_treatments_baseline`
       6) `new_controls` are set to historical values
 
     All other arguments of `expected_outcome` can be passed to this method.
 
     Args:
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the values of the given non_media treatment channel). If
-        None, the minimum value is used as baseline for each non_media treatment
-        channel.
+      non_media_treatments_baseline: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float denoting the fixed
+        value which will be used as baseline for the given channel. If `None`,
+        the values defined with `ModelSpec.non_media_treatments_baseline_values`
+        will be used.
       **expected_outcome_kwargs: kwargs to pass to `expected_outcome`, which
         could contain use_posterior, selected_geos, selected_times,
         aggregate_geos, aggregate_times, inverse_transform_outcome, use_kpi,
@@ -2690,9 +2650,13 @@ class Analyzer:
         else None
     )
     if self._meridian.non_media_treatments is not None:
-      new_non_media_treatments = _compute_non_media_baseline(
-          non_media_treatments=self._meridian.non_media_treatments,
-          non_media_baseline_values=non_media_baseline_values,
+      baseline = (
+          non_media_treatments_baseline
+          or self._meridian.non_media_treatments_baseline
+      )
+      new_non_media_treatments = tf.broadcast_to(
+          tf.constant(baseline, dtype=tf.float32)[tf.newaxis, tf.newaxis, :],
+          self._meridian.non_media_treatments.shape,
       )
     else:
       new_non_media_treatments = None
@@ -2714,7 +2678,7 @@ class Analyzer:
       new_data: DataTensors | None = None,
       use_kpi: bool | None = None,
       include_non_paid_channels: bool = True,
-      non_media_baseline_values: Sequence[str | float] | None = None,
+      non_media_treatments_baseline: Sequence[float] | None = None,
       **kwargs,
   ) -> tf.Tensor:
     """Aggregates the incremental outcome of the media channels.
@@ -2742,13 +2706,11 @@ class Analyzer:
       include_non_paid_channels: Boolean. If `True`, then non-media treatments
         and organic effects are included in the calculation. If `False`, then
         only the paid media and RF effects are included.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the scaled values of the given non_media treatments
-        channel). If not provided, the minimum value is used as the baseline for
-        each non_media treatments channel.
+      non_media_treatments_baseline: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float denoting the fixed
+        value which will be used as baseline for the given channel. If `None`,
+        the values defined with `ModelSpec.non_media_treatments_baseline_values`
+        will be used.
       **kwargs: kwargs to pass to `incremental_outcome`, which could contain
         selected_geos, selected_times, aggregate_geos, aggregate_times,
         batch_size.
@@ -2764,7 +2726,7 @@ class Analyzer:
         new_data=new_data,
         use_kpi=use_kpi,
         include_non_paid_channels=include_non_paid_channels,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline=non_media_treatments_baseline,
         **kwargs,
     )
     incremental_outcome_total = tf.reduce_sum(
@@ -2790,7 +2752,7 @@ class Analyzer:
       confidence_level: float = constants.DEFAULT_CONFIDENCE_LEVEL,
       batch_size: int = constants.DEFAULT_BATCH_SIZE,
       include_non_paid_channels: bool = False,
-      non_media_baseline_values: Sequence[str | float] | None = None,
+      non_media_treatments_baseline: Sequence[float] | None = None,
   ) -> xr.Dataset:
     """Returns summary metrics.
 
@@ -2866,13 +2828,11 @@ class Analyzer:
         reported. If `False`, only the paid channels (media, reach and
         frequency) are included but the summary contains also the metrics
         dependent on spend. Default: `False`.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the values of the given non_media treatment channel). If
-        None, the minimum value is used as baseline for each non_media treatment
-        channel.
+      non_media_treatments_baseline: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float denoting the fixed
+        value which will be used as baseline for the given channel. If `None`,
+        the values defined with `ModelSpec.non_media_treatments_baseline_values`
+        will be used.
 
     Returns:
       An `xr.Dataset` with coordinates: `channel`, `metric` (`mean`, `median`,
@@ -2916,7 +2876,7 @@ class Analyzer:
         new_data=new_data.filter_fields(incremental_outcome_fields),
         use_kpi=use_kpi,
         include_non_paid_channels=include_non_paid_channels,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline=non_media_treatments_baseline,
         **dim_kwargs,
         **batched_kwargs,
     )
@@ -2925,7 +2885,7 @@ class Analyzer:
         new_data=new_data.filter_fields(incremental_outcome_fields),
         use_kpi=use_kpi,
         include_non_paid_channels=include_non_paid_channels,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline=non_media_treatments_baseline,
         **dim_kwargs,
         **batched_kwargs,
     )
@@ -2937,7 +2897,7 @@ class Analyzer:
         scaling_factor0=1,
         scaling_factor1=1 + marginal_roi_incremental_increase,
         include_non_paid_channels=include_non_paid_channels,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline=non_media_treatments_baseline,
         **dim_kwargs,
         **batched_kwargs,
     )
@@ -2950,7 +2910,7 @@ class Analyzer:
             scaling_factor0=1,
             scaling_factor1=1 + marginal_roi_incremental_increase,
             include_non_paid_channels=include_non_paid_channels,
-            non_media_baseline_values=non_media_baseline_values,
+            non_media_treatments_baseline=non_media_treatments_baseline,
             **dim_kwargs,
             **batched_kwargs,
         )
@@ -3274,7 +3234,7 @@ class Analyzer:
       selected_times: Sequence[str] | None = None,
       aggregate_geos: bool = True,
       aggregate_times: bool = True,
-      non_media_baseline_values: Sequence[float | str] | None = None,
+      non_media_treatments_baseline: Sequence[float] | None = None,
       confidence_level: float = constants.DEFAULT_CONFIDENCE_LEVEL,
       batch_size: int = constants.DEFAULT_BATCH_SIZE,
   ) -> xr.Dataset:
@@ -3289,13 +3249,11 @@ class Analyzer:
         all of the regions.
       aggregate_times: Boolean. If `True`, the expected outcome is summed over
         all of the time periods.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the values of the given non_media treatment channel). If
-        None, the minimum value is used as baseline for each non_media treatment
-        channel.
+      non_media_treatments_baseline: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float denoting the fixed
+        value which will be used as baseline for the given channel. If `None`,
+        the values defined with `ModelSpec.non_media_treatments_baseline_values`
+        will be used.
       confidence_level: Confidence level for media summary metrics credible
         intervals, represented as a value between zero and one.
       batch_size: Integer representing the maximum draws per chain in each
@@ -3365,7 +3323,7 @@ class Analyzer:
         self._calculate_baseline_expected_outcome(
             use_posterior=False,
             use_kpi=use_kpi,
-            non_media_baseline_values=non_media_baseline_values,
+            non_media_treatments_baseline=non_media_treatments_baseline,
             **outcome_kwargs,
         ),
         axis=-1,
@@ -3374,7 +3332,7 @@ class Analyzer:
         self._calculate_baseline_expected_outcome(
             use_posterior=True,
             use_kpi=use_kpi,
-            non_media_baseline_values=non_media_baseline_values,
+            non_media_treatments_baseline=non_media_treatments_baseline,
             **outcome_kwargs,
         ),
         axis=-1,

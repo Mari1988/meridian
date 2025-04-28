@@ -34,6 +34,35 @@ __all__ = [
 ]
 
 
+def _aggregate_spend_by_channel(
+    spend: tf.Tensor,
+    calibration_period: tf.Tensor | None = None,
+) -> tf.Tensor:
+  """Calculate total spend by channel aggregated over geos and times.
+
+  Args:
+    spend: A tensor of spend values with shape `(n_geos, n_times, n_channels)`.
+    calibration_period: A boolean tensor with the shape `(n_media_times,
+      n_channels)` indicating which time periods are used for calculation for
+      each channel. If `None`, all time periods are used for calculation.
+
+  Returns:
+    A tensor of spend values with shape `(n_channels,)`.
+  """
+  if calibration_period is None:
+    return tf.reduce_sum(spend, axis=[0, 1])
+
+  n_times = spend.shape[1]
+
+  # The `calibration_period` has `n_media_times` time periods which may be more
+  # than the number of time periods in the spend tensor which is `n_times`. If
+  # that is the case, we only use the last `n_times` time periods of the
+  # calibration period for spend calculation.
+  factors = tf.where(calibration_period[-n_times:, :], 1.0, 0.0)
+
+  return tf.einsum("gtm,tm->m", spend, factors)
+
+
 @dataclasses.dataclass(frozen=True)
 class MediaTensors:
   """Container for media tensors.

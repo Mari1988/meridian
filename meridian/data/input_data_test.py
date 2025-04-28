@@ -752,7 +752,6 @@ class InputDataTest(parameterized.TestCase):
   @parameterized.named_parameters(
       dict(testcase_name="geo_time_channel", n_geos=10, n_times=100),
       dict(testcase_name="channel", n_geos=None, n_times=None),
-      dict(testcase_name="geo_channel", n_geos=10, n_times=None),
   )
   def test_rf_spend_properties(self, n_geos: int | None, n_times: int | None):
     rf_spend = test_utils.random_rf_spend_nd_da(
@@ -807,7 +806,6 @@ class InputDataTest(parameterized.TestCase):
         media=self.not_lagged_media,
         media_spend=self.media_spend_1d,
     )
-
     xr.testing.assert_equal(data.kpi, self.not_lagged_kpi)
     xr.testing.assert_equal(data.revenue_per_kpi, self.revenue_per_kpi)
     xr.testing.assert_equal(data.media, self.not_lagged_media)
@@ -1575,6 +1573,148 @@ class NonpaidInputDataTest(parameterized.TestCase):
     # Need to convert expected_outcome to a 0-d DataArray for assert_allclose
     expected_outcome_da = xr.DataArray(expected_outcome)
     self.assertAlmostEqual(total_outcome, expected_outcome_da)
+
+
+class AllocateSpendTest(parameterized.TestCase):
+  """Tests for the _allocate_spend method."""
+
+  def setUp(self):
+    super().setUp()
+    self.n_geos = 2
+    self.n_times = 3
+    self.n_media_channels = 2
+    self.geos = [f"g{i}" for i in range(self.n_geos)]
+    self.times = pd.date_range(
+        start="2023-01-08", periods=self.n_times, freq="W"
+    ).strftime(constants.DATE_FORMAT)
+    self.media_times = pd.date_range(
+        start="2023-01-01",
+        periods=self.n_times + 1,
+        freq="W",  # n_times for kpi + 1 lag
+    ).strftime(constants.DATE_FORMAT)
+    self.media_channels = [f"mc{i}" for i in range(self.n_media_channels)]
+
+    # Dummy InputData instance needed to call the private method
+    # We only need kpi for time/geo coords, and media for media_time coords
+    dummy_kpi = xr.DataArray(
+        np.random.rand(self.n_geos, self.n_times),
+        coords=[self.geos, self.times],
+        dims=[constants.GEO, constants.TIME],
+        name=constants.KPI,
+    )
+    dummy_media = xr.DataArray(
+        np.random.rand(self.n_geos, self.n_times + 1, self.n_media_channels),
+        coords=[self.geos, self.media_times, self.media_channels],
+        dims=[constants.GEO, constants.MEDIA_TIME, constants.MEDIA_CHANNEL],
+        name=constants.MEDIA,
+    )
+    # Need minimal valid InputData structure to instantiate
+    dummy_controls = xr.DataArray(
+        np.random.rand(self.n_geos, self.n_times, 1),
+        coords=[self.geos, self.times, ["control1"]],
+        dims=[constants.GEO, constants.TIME, constants.CONTROL_VARIABLE],
+        name=constants.CONTROLS,
+    )
+    dummy_population = xr.DataArray(
+        np.random.rand(self.n_geos),
+        coords=[self.geos],
+        dims=[constants.GEO],
+        name=constants.POPULATION,
+    )
+    self.input_data_instance = input_data.InputData(
+        kpi=dummy_kpi,
+        kpi_type=constants.NON_REVENUE,
+        controls=dummy_controls,
+        population=dummy_population,
+        media=dummy_media,  # Pass dummy media to satisfy validation
+        media_spend=xr.DataArray(  # Pass dummy spend to satisfy validation
+            np.random.rand(self.n_geos, self.n_times, self.n_media_channels),
+            coords=[self.geos, self.times, self.media_channels],
+            dims=[constants.GEO, constants.TIME, constants.MEDIA_CHANNEL],
+            name=constants.MEDIA_SPEND,
+        ),
+    )
+
+  def test_allocate_spend_basic(self):
+    """Tests basic allocation, dimensions, and total spend conservation."""
+    spend_1d = xr.DataArray(
+        [1000, 2000],
+        coords=[self.media_channels],
+        dims=[constants.MEDIA_CHANNEL],
+        name=constants.MEDIA_SPEND,
+    )
+    media_units_3d = xr.DataArray(
+        np.array(
+            [[[10, 20], [15, 25]], [[30, 40], [35, 45]], [[50, 60], [55, 65]]]
+        ).transpose(
+            1, 0, 2
+        ),  # geo, time, channel
+        coords=[
+            self.geos,
+            self.media_times[-self.n_times :],
+            self.media_channels,
+        ],  # Match kpi time
+        dims=[constants.GEO, constants.MEDIA_TIME, constants.MEDIA_CHANNEL],
+        name=constants.MEDIA,
+    )
+
+    # Need to create a dummy InputData instance to call the private method
+    # Or directly call the private method using name mangling
+    allocated_spend = self.input_data_instance._allocate_spend(
+        spend_1d, media_units_3d
+    )
+
+    # 1. Verify dimensions
+    self.assertEqual(
+        allocated_spend.dims,
+        (constants.GEO, constants.TIME, constants.MEDIA_CHANNEL),
+    )
+    self.assertLen(allocated_spend[constants.GEO], self.n_geos)
+    self.assertLen(allocated_spend[constants.TIME], self.n_times)
+    self.assertLen(
+        allocated_spend[constants.MEDIA_CHANNEL], self.n_media_channels
+    )
+    # Verify time coordinates match kpi time, not media_time
+    np.testing.assert_array_equal(
+        allocated_spend[constants.TIME].values, self.times
+    )
+
+    # 2. Verify total spend conservation per channel
+    total_allocated = allocated_spend.sum(dim=[constants.GEO, constants.TIME])
+    xr.testing.assert_allclose(total_allocated, spend_1d)
+
+  def test_allocate_spend_all_zero_media(self):
+    """Tests allocation when all media units across all channels are zero."""
+    spend_1d = xr.DataArray(
+        [1000, 2000],
+        coords=[self.media_channels],
+        dims=[constants.MEDIA_CHANNEL],
+        name=constants.MEDIA_SPEND,
+    )
+    # All media units are zero
+    media_units_array = np.zeros(
+        (self.n_geos, self.n_times + 1, self.n_media_channels)
+    )  # +1 for lag
+
+    media_units_3d = xr.DataArray(
+        media_units_array,
+        coords=[self.geos, self.media_times, self.media_channels],
+        dims=[constants.GEO, constants.MEDIA_TIME, constants.MEDIA_CHANNEL],
+        name=constants.MEDIA,
+    )
+
+    allocated_spend = self.input_data_instance._allocate_spend(
+        spend_1d, media_units_3d
+    )
+
+    # Verify dimensions are still correct
+    self.assertEqual(
+        allocated_spend.dims,
+        (constants.GEO, constants.TIME, constants.MEDIA_CHANNEL),
+    )
+
+    # All channels had zero total units, expect all NaN allocation
+    self.assertTrue(np.isnan(allocated_spend).all())
 
 
 if __name__ == "__main__":
