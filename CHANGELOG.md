@@ -27,6 +27,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 * Prevent negative media effect priors when using lognormal distribution upon
   model init.
 * Add an optional `optimization_grid` arg to the optimizer.
+* Change optimizer parameter 'selected_times' to 'start_date' and 'end_date'.
 
 ## [1.0.9] - 2025-04-17
 

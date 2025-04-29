@@ -616,7 +616,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
 
     expected_times = self.input_data_media_and_rf.time.values.tolist()
     optimization_results = self.budget_optimizer_media_and_rf.optimize(
-        selected_times=None
+        start_date=None,
+        end_date=None,
     )
 
     self.assertEqual(
@@ -665,11 +666,6 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
           'selected_times_arg': [None, None],
           'expected_times': None,
       },
-      {
-          'testcase_name': 'none',
-          'selected_times_arg': None,
-          'expected_times': None,
-      },
   )
   @mock.patch.object(analyzer.Analyzer, 'incremental_outcome', autospec=True)
   def test_selected_times_used_correctly(
@@ -680,9 +676,12 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
         _N_DRAWS,
         _N_MEDIA_CHANNELS + _N_RF_CHANNELS,
     ))
+    start_time = selected_times_arg[0]
+    end_time = selected_times_arg[1]
 
     self.budget_optimizer_media_and_rf.optimize(
-        selected_times=selected_times_arg
+        start_date=start_time,
+        end_date=end_time,
     )
 
     _, mock_kwargs = mock_incremental_outcome.call_args
@@ -691,31 +690,29 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
   @parameterized.named_parameters(
       {
           'testcase_name': 'selected_times_range',
-          'selected_times': ['2025-04-07', '2025-04-21'],
+          'start_date': '2025-04-07',
+          'end_date': '2025-04-21',
           'expected_times': [False, True, True, True, False],
           'expected_dates': ['2025-04-07', '2025-04-21'],
       },
       {
           'testcase_name': 'end_none',
-          'selected_times': ['2025-04-14', None],
+          'start_date': '2025-04-14',
+          'end_date': None,
           'expected_times': [False, False, True, True, True],
           'expected_dates': ['2025-04-14', '2025-04-28'],
       },
       {
           'testcase_name': 'start_none',
-          'selected_times': [None, '2025-04-14'],
+          'start_date': None,
+          'end_date': '2025-04-14',
           'expected_times': [True, True, True, False, False],
           'expected_dates': ['2025-03-31', '2025-04-14'],
       },
       {
           'testcase_name': 'none_tuple',
-          'selected_times': [None, None],
-          'expected_times': None,
-          'expected_dates': ['2025-03-31', '2025-04-28'],
-      },
-      {
-          'testcase_name': 'none',
-          'selected_times': None,
+          'start_date': None,
+          'end_date': None,
           'expected_times': None,
           'expected_dates': ['2025-03-31', '2025-04-28'],
       },
@@ -724,7 +721,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
   def test_selected_times_new_data_used_correctly(
       self,
       mock_inc_outcome,
-      selected_times,
+      start_date,
+      end_date,
       expected_times,
       expected_dates,
   ):
@@ -742,7 +740,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     ]
 
     optimization_results = self.budget_optimizer_media_and_rf.optimize(
-        selected_times=selected_times,
+        start_date=start_date,
+        end_date=end_date,
         new_data=analyzer.DataTensors(
             media=self.meridian_media_and_rf.media_tensors.media[..., -5:, :],
             reach=self.meridian_media_and_rf.rf_tensors.reach[..., -5:, :],
@@ -889,7 +888,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
 
     optimization_results = budget_optimizer_media_and_rf.optimize(
-        selected_times=('2021-01-25', '2021-03-08'),
+        start_date='2021-01-25',
+        end_date='2021-03-08',
         # TODO: set optimal frequency back to true once the bug is
         # fixed.
         use_optimal_frequency=False,
@@ -1407,13 +1407,14 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
         ],
         time=times[-total_times:],
     )
-    selected_times = (start_date, end_date)
     actual = self.budget_optimizer_media_and_rf.optimize(
         new_data=new_data,
-        selected_times=selected_times,
+        start_date=start_date,
+        end_date=end_date,
     )
     expected = self.budget_optimizer_media_and_rf.optimize(
-        selected_times=selected_times
+        start_date=start_date,
+        end_date=end_date,
     )
     _verify_actual_vs_expected_budget_data(
         actual.nonoptimized_data, expected.nonoptimized_data
@@ -1495,10 +1496,12 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     spend_constraint_lower = np.array([0.5, 0.4, 0.3, 0.2, 0.1])
     spend_constraint_upper = np.array([0.5, 0.4, 0.3, 0.2, 0.1])
-    selected_times = ('2021-01-25', '2021-02-01')
+    start_date = '2021-01-25'
+    end_date = '2021-02-01'
     optimization_grid = (
         self.budget_optimizer_media_and_rf.create_optimization_grid(
-            selected_times=selected_times,
+            start_date=start_date,
+            end_date=end_date,
             spend_constraint_lower=spend_constraint_lower,
             spend_constraint_upper=spend_constraint_upper,
             gtol=0.01,
@@ -1538,7 +1541,7 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     mock_incremental_outcome.assert_called_with(
         use_posterior=True,
         new_data=mock.ANY,
-        selected_times=list(selected_times),
+        selected_times=[start_date, end_date],
         use_kpi=False,
         batch_size=c.DEFAULT_BATCH_SIZE,
         include_non_paid_channels=False,
@@ -1581,10 +1584,12 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     spend_constraint_lower = np.array([0.5, 0.4, 0.3])
     spend_constraint_upper = np.array([0.5, 0.4, 0.3])
-    selected_times = ('2021-01-25', '2021-02-01')
+    start_date = '2021-01-25'
+    end_date = '2021-02-01'
     optimization_grid = (
         self.budget_optimizer_media_only.create_optimization_grid(
-            selected_times=selected_times,
+            start_date=start_date,
+            end_date=end_date,
             spend_constraint_lower=spend_constraint_lower,
             spend_constraint_upper=spend_constraint_upper,
             gtol=0.01,
@@ -1623,7 +1628,7 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     mock_incremental_outcome.assert_called_with(
         use_posterior=True,
         new_data=mock.ANY,
-        selected_times=list(selected_times),
+        selected_times=[start_date, end_date],
         batch_size=c.DEFAULT_BATCH_SIZE,
         use_kpi=False,
         include_non_paid_channels=False,
@@ -1664,9 +1669,11 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     spend_constraint_lower = np.array([0.5, 0.4])
     spend_constraint_upper = np.array([0.5, 0.4])
-    selected_times = ('2021-01-25', '2021-02-01')
+    start_date = '2021-01-25'
+    end_date = '2021-02-01'
     optimization_grid = self.budget_optimizer_rf_only.create_optimization_grid(
-        selected_times=selected_times,
+        start_date=start_date,
+        end_date=end_date,
         spend_constraint_lower=spend_constraint_lower,
         spend_constraint_upper=spend_constraint_upper,
         gtol=0.01,
@@ -1705,7 +1712,7 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     mock_incremental_outcome.assert_called_with(
         use_posterior=True,
         new_data=mock.ANY,
-        selected_times=list(selected_times),
+        selected_times=[start_date, end_date],
         batch_size=c.DEFAULT_BATCH_SIZE,
         use_kpi=False,
         include_non_paid_channels=False,
@@ -1761,10 +1768,12 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     spend_constraint_lower = np.array([0.5, 0.4, 0.3, 0.2, 0.1])
     spend_constraint_upper = np.array([0.5, 0.4, 0.3, 0.2, 0.1])
-    selected_times = ('2021-01-25', '2021-02-01')
+    start_date = '2021-01-25'
+    end_date = '2021-02-01'
     optimization_grid = (
         self.budget_optimizer_media_and_rf.create_optimization_grid(
-            selected_times=selected_times,
+            start_date=start_date,
+            end_date=end_date,
             spend_constraint_lower=spend_constraint_lower,
             spend_constraint_upper=spend_constraint_upper,
             gtol=0.01,
@@ -1807,7 +1816,7 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     mock_incremental_outcome.assert_called_with(
         use_posterior=True,
         new_data=mock.ANY,
-        selected_times=list(selected_times),
+        selected_times=[start_date, end_date],
         batch_size=c.DEFAULT_BATCH_SIZE,
         use_kpi=False,
         include_non_paid_channels=False,
@@ -1859,9 +1868,11 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     spend_constraint_lower = np.array([0.5, 0.4])
     spend_constraint_upper = np.array([0.5, 0.4])
-    selected_times = ('2021-01-25', '2021-02-01')
+    start_date = '2021-01-25'
+    end_date = '2021-02-01'
     optimization_grid = self.budget_optimizer_rf_only.create_optimization_grid(
-        selected_times=selected_times,
+        start_date=start_date,
+        end_date=end_date,
         spend_constraint_lower=spend_constraint_lower,
         spend_constraint_upper=spend_constraint_upper,
         gtol=0.01,
@@ -1903,7 +1914,7 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     mock_incremental_outcome.assert_called_with(
         use_posterior=True,
         new_data=mock.ANY,
-        selected_times=list(selected_times),
+        selected_times=[start_date, end_date],
         batch_size=c.DEFAULT_BATCH_SIZE,
         use_kpi=False,
         include_non_paid_channels=False,
@@ -2266,9 +2277,15 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
       dict(
-          testcase_name='selected_times',
-          create_optimization_grid_args={'selected_times': None},
-          optimize_args={'selected_times': ('2021-01-25', '2021-02-01')},
+          testcase_name='start_date',
+          create_optimization_grid_args={'start_date': None},
+          optimize_args={'start_date': '2021-02-01'},
+          warning_regex='optimization grid was created with `selected_times`',
+      ),
+      dict(
+          testcase_name='end_date',
+          create_optimization_grid_args={'end_date': None},
+          optimize_args={'end_date': '2021-02-01'},
           warning_regex='optimization grid was created with `selected_times`',
       ),
       dict(
@@ -2324,7 +2341,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
       budget_optimizer.optimize(optimization_grid=grid, **optimize_args)
     default_optimization_args = {
         'new_data': None,
-        'selected_times': None,
+        'start_date': None,
+        'end_date': None,
         'budget': None,
         'pct_of_spend': None,
         'spend_constraint_lower': 0.3,
@@ -2363,7 +2381,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     mock_create_optimization_grid_media_and_rf.assert_called_once()
 
   def test_optimize_with_wrong_new_data_grid_new_grid_created(self):
-    selected_times = ('2025-04-07', '2025-04-28')
+    start_date = '2025-04-07'
+    end_date = '2025-04-28'
     new_times = [
         '2025-03-31',
         '2025-04-07',
@@ -2392,7 +2411,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     create_optimization_grid_args = {
         'new_data': new_data,
-        'selected_times': ('2025-04-07', '2025-04-21'),
+        'start_date': '2025-04-07',
+        'end_date': '2025-04-21',
         'gtol': 0.01,
     }
     grid = budget_optimizer.create_optimization_grid(
@@ -2400,7 +2420,8 @@ class OptimizerAlgorithmTest(parameterized.TestCase):
     )
     optimization_args = {
         'new_data': new_data,
-        'selected_times': selected_times,
+        'start_date': start_date,
+        'end_date': end_date,
         'budget': None,
         'pct_of_spend': None,
         'spend_constraint_lower': 0.3,
