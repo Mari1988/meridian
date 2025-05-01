@@ -4265,7 +4265,7 @@ class AnalyzerNonMediaTest(tf.test.TestCase, parameterized.TestCase):
           testcase_name="mix_as_floats",
           use_posterior=True,
           expected_result=test_utils.INC_OUTCOME_NON_MEDIA_MIX,
-          non_media_baseline_values=["min", 3.630, 2.448, "min"],
+          non_media_baseline_values=["min", 15.695609, 11.22775, "min"],
       ),
       dict(
           testcase_name="all_fixed",

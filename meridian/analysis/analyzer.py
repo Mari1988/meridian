@@ -653,7 +653,6 @@ def _scale_tensors_by_multiplier(
     data: DataTensors,
     multiplier: float,
     by_reach: bool,
-    non_media_treatments_baseline: tf.Tensor | None = None,
 ) -> DataTensors:
   """Get scaled tensors for incremental outcome calculation.
 
@@ -665,10 +664,6 @@ def _scale_tensors_by_multiplier(
     multiplier: Float indicating the factor to scale tensors by.
     by_reach: Boolean indicating whether to scale reach or frequency when rf
       data is available.
-    non_media_treatments_baseline: Optional tensor to overwrite
-      `data.non_media_treatments` in the output. Used to compute the
-      conterfactual values for incremental outcome calculation. If not used, the
-      unmodified `data.non_media_treatments` tensor is returned in the output.
 
   Returns:
     A `DataTensors` object containing scaled tensor parameters. The original
@@ -697,14 +692,9 @@ def _scale_tensors_by_multiplier(
       incremented_data[constants.ORGANIC_FREQUENCY] = (
           data.organic_frequency * multiplier
       )
-  if non_media_treatments_baseline is not None:
-    incremented_data[constants.NON_MEDIA_TREATMENTS] = (
-        non_media_treatments_baseline
-    )
-  else:
-    incremented_data[constants.NON_MEDIA_TREATMENTS] = data.non_media_treatments
 
   # Include the original data that does not get scaled.
+  incremented_data[constants.NON_MEDIA_TREATMENTS] = data.non_media_treatments
   incremented_data[constants.MEDIA_SPEND] = data.media_spend
   incremented_data[constants.RF_SPEND] = data.rf_spend
   incremented_data[constants.CONTROLS] = data.controls
@@ -1594,7 +1584,7 @@ class Analyzer:
       self,
       data_tensors: DataTensors,
       dist_tensors: DistributionTensors,
-      non_media_baseline_values: Sequence[float | str] | None = None,
+      non_media_treatments_baseline_scaled: Sequence[float] | None = None,
   ) -> tf.Tensor:
     """Computes incremental KPI distribution.
 
@@ -1608,13 +1598,11 @@ class Analyzer:
       dist_tensors: A `DistributionTensors` container with the distribution
         tensors for media, RF, organic media, organic RF and non-media
         treatments channels.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the scaled values of the given non_media treatments
-        channel). If None, the minimum value is used as baseline for each
-        non_media treatments channel.
+      non_media_treatments_baseline_scaled: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float that will be used as
+        baseline for the given channel. The values are scaled by the
+        `Meridian.non_media_transformer`. Required if the data contains
+        non-media treatments.
 
     Returns:
       Tensor of incremental KPI distribution.
@@ -1641,13 +1629,10 @@ class Analyzer:
         combined_beta,
     )
     if data_tensors.non_media_treatments is not None:
-      non_media_scaled_baseline = _compute_non_media_baseline(
-          non_media_treatments=data_tensors.non_media_treatments,
-          non_media_baseline_values=non_media_baseline_values,
-      )
       non_media_kpi = tf.einsum(
           "gtn,...gn->...gtn",
-          data_tensors.non_media_treatments - non_media_scaled_baseline,
+          data_tensors.non_media_treatments
+          - non_media_treatments_baseline_scaled,
           dist_tensors.gamma_gn,
       )
       return tf.concat([combined_media_kpi, non_media_kpi], axis=-1)
@@ -1697,7 +1682,7 @@ class Analyzer:
       self,
       data_tensors: DataTensors,
       dist_tensors: DistributionTensors,
-      non_media_baseline_values: Sequence[float | str] | None = None,
+      non_media_treatments_baseline_scaled: Sequence[float] | None = None,
       inverse_transform_outcome: bool | None = None,
       use_kpi: bool | None = None,
       selected_geos: Sequence[str] | None = None,
@@ -1726,16 +1711,14 @@ class Analyzer:
         T x n_non_media_channels), for any time dimension T. `revenue_per_kpi`:
         Contains revenue per kpi data with shape `(n_geos x T)`, for any time
         dimension `T`.
-     dist_tensors: A `DistributionTensors` container with the distribution
-       tensors for media, RF, organic media, organic RF and non-media treatments
-       channels.
-      non_media_baseline_values: Optional list of shape (n_non_media_channels,).
-        Each element is either a float (which means that the fixed value will be
-        used as baseline for the given channel) or one of the strings "min" or
-        "max" (which mean that the global minimum or maximum value will be used
-        as baseline for the scaled values of the given non_media treatments
-        channel). If None, the minimum value is used as baseline for each
-        non_media treatments channel.
+      dist_tensors: A `DistributionTensors` container with the distribution
+        tensors for media, RF, organic media, organic RF and non-media
+        treatments channels.
+      non_media_treatments_baseline_scaled: Optional list of shape
+        `(n_non_media_channels,)`. Each element is a float that will be used as
+        baseline for the given channel. The values are scaled by the
+        `Meridian.non_media_transformer`. Required if the data contains
+        non-media treatments.
       inverse_transform_outcome: Boolean. If `True`, returns the expected
         outcome in the original KPI or revenue (depending on what is passed to
         `use_kpi`), as it was passed to `InputData`. If False, returns the
@@ -1763,7 +1746,7 @@ class Analyzer:
     transformed_outcome = self._get_incremental_kpi(
         data_tensors=data_tensors,
         dist_tensors=dist_tensors,
-        non_media_baseline_values=non_media_baseline_values,
+        non_media_treatments_baseline_scaled=non_media_treatments_baseline_scaled,
     )
     if inverse_transform_outcome:
       incremental_outcome = self._inverse_outcome(
@@ -2014,28 +1997,41 @@ class Analyzer:
     )[:, None]
 
     if data_tensors.non_media_treatments is not None:
-      new_non_media_treatments0 = _compute_non_media_baseline(
+      non_media_treatments_baseline = _compute_non_media_baseline(
           non_media_treatments=data_tensors.non_media_treatments,
           non_media_baseline_values=non_media_baseline_values,
           non_media_selected_times=non_media_selected_times,
       )
+      non_media_treatments_baseline_scaled = self._meridian.non_media_transformer.forward(  # pytype: disable=attribute-error
+          non_media_treatments_baseline
+      )
     else:
-      new_non_media_treatments0 = None
+      non_media_treatments_baseline_scaled = None
 
     incremented_data0 = _scale_tensors_by_multiplier(
         data=data_tensors,
         multiplier=counterfactual0,
         by_reach=by_reach,
-        non_media_treatments_baseline=new_non_media_treatments0,
     )
     incremented_data1 = _scale_tensors_by_multiplier(
         data=data_tensors, multiplier=counterfactual1, by_reach=by_reach
     )
 
-    data_tensors0 = self._get_scaled_data_tensors(
+    scaled_data0 = self._get_scaled_data_tensors(
         new_data=incremented_data0,
         include_non_paid_channels=include_non_paid_channels,
     )
+    data_tensors0 = DataTensors(
+        media=scaled_data0.media,
+        reach=scaled_data0.reach,
+        frequency=scaled_data0.frequency,
+        organic_media=scaled_data0.organic_media,
+        organic_reach=scaled_data0.organic_reach,
+        organic_frequency=scaled_data0.organic_frequency,
+        revenue_per_kpi=scaled_data0.revenue_per_kpi,
+        non_media_treatments=non_media_treatments_baseline_scaled,
+    )
+
     data_tensors1 = self._get_scaled_data_tensors(
         new_data=incremented_data1,
         include_non_paid_channels=include_non_paid_channels,
@@ -2062,7 +2058,9 @@ class Analyzer:
     incremental_outcome_kwargs = {
         "inverse_transform_outcome": inverse_transform_outcome,
         "use_kpi": use_kpi,
-        "non_media_baseline_values": non_media_baseline_values,
+        "non_media_treatments_baseline_scaled": (
+            non_media_treatments_baseline_scaled
+        ),
     }
     for i, start_index in enumerate(batch_starting_indices):
       stop_index = np.min([n_draws, start_index + batch_size])
