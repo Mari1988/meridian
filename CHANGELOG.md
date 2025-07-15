@@ -23,6 +23,18 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ## [Unreleased]
 
+## [1.1.6] - 2025-07-14
+
+* Convert stateful seeds into stateless seeds in `sample_posterior()` to ensure
+  the sampling is deterministic.
+
+## [1.1.5] - 2025-07-10
+
+* Remove `sigma_dims` pseudo-dimension from inference data.
+* Sets builder-wide default column names in `DataFrameInputDataBuilder`.
+
+## [1.1.4] - 2025-06-30
+
 * `XrDatasetDataLoader` to use new `InputDataBuilder` API under the hood.
   These changes are backwards compatible.
 * Fix mishandling of an empty `controls` column list in the data loader params.
@@ -333,4 +345,7 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 [1.1.1]: https://github.com/google/meridian/releases/tag/v1.1.1
 [1.1.2]: https://github.com/google/meridian/releases/tag/v1.1.2
 [1.1.3]: https://github.com/google/meridian/releases/tag/v1.1.3
-[Unreleased]: https://github.com/google/meridian/compare/v1.1.3...HEAD
+[1.1.4]: https://github.com/google/meridian/releases/tag/v1.1.4
+[1.1.5]: https://github.com/google/meridian/releases/tag/v1.1.5
+[1.1.6]: https://github.com/google/meridian/releases/tag/v1.1.6
+[Unreleased]: https://github.com/google/meridian/compare/v1.1.6...HEAD
