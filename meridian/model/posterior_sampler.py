@@ -154,7 +154,7 @@ class PosteriorMCMCSampler:
         eta_m = yield prior_broadcast.eta_m
         slope_m = yield prior_broadcast.slope_m
         beta_gm_dev = yield tfp.distributions.Sample(
-            tfp.distributions.HalfNormal(1.253),  # 1.253 is the standard deviation of the half-normal distribution that has a mean of 1
+            tfp.distributions.Normal(0, 1),
             [n_geos, n_media_channels],
             name=constants.BETA_GM_DEV,
         )
