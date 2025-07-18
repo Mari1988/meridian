@@ -5,6 +5,8 @@ import altair as alt
 from pathlib import Path
 from html import escape
 
+from meridian.model import model
+
 class MeridianMPAInput:
 
 # class level constants
@@ -51,7 +53,7 @@ class MeridianMPAInput:
     mdf_all = pd.read_csv(self.file_path)
 
     # filter down to the specific advertiser and the conversion type
-    mdf = mdf_all[(mdf_all['AdvertiserName'] == self.advertiser) & (mdf_all['ConversionType'] == self.conversion_type)]
+    mdf = mdf_all[(mdf_all['AdvertiserName'] == self.advertiser) & (mdf_all['ConversionType'] == self.conversion_type)].copy()
 
     # bound the data to the analysis window
     mdf.loc[:, self.date_field] = pd.to_datetime(mdf[self.date_field])
@@ -116,13 +118,48 @@ class MeridianMPAInput:
       cpm_array_working_spend_weighted = cpm_array * np.array(working_cost_array)
       coeff_prior = cpm_array_working_spend_weighted / np.max(cpm_array_working_spend_weighted)  # --> working spend scaled CPM prior
     else:
-      ValueError("invalid prior type")
+      raise ValueError("invalid prior type")
 
-      # self.costs_scaled = self.cost_scaler.fit_transform(costs_train.values)
-      print(f"prior type is {prior_type} and prior values are {coeff_prior}")
+    # self.costs_scaled = self.cost_scaler.fit_transform(costs_train.values)
+    print(f"prior type is {prior_type} and prior values are {coeff_prior}")
 
     return coeff_prior
 
+  @staticmethod
+  def get_media_transformation_params_df(model_summary_df: pd.DataFrame, mmm: model.Meridian) -> pd.DataFrame:
+    """
+    Extracts and cleans the media transformation parameters from the model summary DataFrame.
+    """
+    # get the media transformation parameters cleaned and channels split
+    media_transformation_params_df = model_summary_df[
+        (model_summary_df['index'].str.startswith('alpha_') |
+        model_summary_df['index'].str.startswith('ec_') |
+        model_summary_df['index'].str.startswith('slope_'))
+    ].copy()
+
+    # split the media transformation parameters into channels
+    index_series = pd.Series(media_transformation_params_df['index'])
+    media_transformation_params_df['parameter_type'] = index_series.str.extract(r'^([^[]+)')
+    media_transformation_params_df['channel'] = index_series.str.extract(r'\[([^\]]+)')
+    media_transformation_params_df = media_transformation_params_df[['channel', 'parameter_type', 'median']].copy()
+
+    # calculate the halfsaturation value
+    if mmm.input_data.media_spend is not None:
+      media_spend_summed = mmm.input_data.media_spend.sum(dim="geo")
+      median_spend_df = media_spend_summed.where(media_spend_summed > 0).median(axis=0).to_dataframe()
+
+      # get the parameter type equals ec_m and multiply by median spend
+      ec_m_df = pd.DataFrame(media_transformation_params_df[media_transformation_params_df['parameter_type'] == 'ec_m'].copy())
+      ec_m_df = ec_m_df.set_index('channel')  # Set index to channel names
+      ec_m_df['median'] = ec_m_df['median'] * median_spend_df['media_spend']  # Multiplies where index names match
+      ec_m_df['parameter_type'] = 'halfsaturation_value'
+
+      # row bind the ec_m_df and the media_transformation_params_df
+      media_transformation_params_df = pd.concat([pd.DataFrame(media_transformation_params_df), ec_m_df.reset_index()], axis=0)
+
+    return pd.DataFrame(media_transformation_params_df)
+
+  @staticmethod
   def get_informative_halfsat_prior_multipliers():
     ec50_dict = {
       "Audi": [2.9631775, 9.19013014, 5.88888516],
