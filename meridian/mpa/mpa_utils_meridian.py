@@ -27,7 +27,7 @@ class MeridianMPAInput:
     self.adstock_range_low = main_config.get('adstock_range_low')
     self.adstock_range_high = main_config.get('adstock_range_high')
     self.prior_halfsat_frequency = main_config.get('prior_halfsat_frequency')
-    self.holiday_file_path = main_config['holiday_file_path'] + f"{client}.csv"
+    # self.holiday_file_path = main_config['holiday_file_path'] + f"{client}.csv"
     self.target = main_config['response_kpi']
     self.prior_type = main_config['prior_type']
 
