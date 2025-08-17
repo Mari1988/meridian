@@ -268,10 +268,8 @@ class TestResponseCurveGenerator:
         # Test 4: Spend-based response curves
         self.test_spend_based_response_curves()
         
-        # Test 5: MPA-style visualization
-        self.test_mpa_style_visualization()
         
-        # Test 6: Performance and edge cases
+        # Test 5: Performance and edge cases
         self.test_performance_and_edge_cases()
         
         # Print final results
@@ -437,63 +435,17 @@ class TestResponseCurveGenerator:
                 if correlation < 0.8:
                     print(f"   ⚠️  Weak correlation in {channel_name}: {correlation:.3f}")
             
-            # Test CSV export
-            generator.export_response_curves(response_curves, curve_metadata)
-            
-            # Read exported CSV to validate
-            df = pd.read_csv("national_response_curves.csv")
-            expected_columns = ['channel', 'spend_multiplier', 'actual_spend', 'actual_kpi_contribution']
-            missing_columns = [col for col in expected_columns if col not in df.columns]
-            
-            if missing_columns:
-                raise ValueError(f"Missing columns in CSV: {missing_columns}")
-            
-            print("✅ CSV export validated")
+            print("✅ Response curves data validated")
             self.test_results['spend_based_curves'] = True
             
         except Exception as e:
             print(f"❌ Spend-based curves test failed: {e}")
             self.test_results['spend_based_curves'] = False
     
-    def test_mpa_style_visualization(self):
-        """Test MPA-style visualization functionality."""
-        print("\n🎨 TEST 5: MPA-Style Visualization")
-        print("-" * 50)
-        
-        try:
-            # Setup mock model
-            model = MockCompleteModel()
-            generator = ResponseCurveGenerator(model)
-            
-            # Generate response curves
-            response_curves, curve_metadata = generator.generate_response_curves(
-                max_multiplier=1.5,
-                num_steps=20,
-                aggregation_level="national"
-            )
-            
-            # Test visualization creation
-            generator.plot_response_curves(
-                response_curves, curve_metadata,
-                figure_size=(10, 8),
-                save_plots=True,
-                output_dir="."
-            )
-            
-            print("✅ MPA-style visualization created successfully")
-            print("   📊 Individual channel plots with markers")
-            print("   📊 Combined plot with all channels")
-            print("   🎯 Historical average and half-saturation markers")
-            
-            self.test_results['mpa_visualization'] = True
-            
-        except Exception as e:
-            print(f"❌ MPA visualization test failed: {e}")
-            self.test_results['mpa_visualization'] = False
     
     def test_performance_and_edge_cases(self):
         """Test performance and edge case handling."""
-        print("\n⚡ TEST 6: Performance and Edge Cases")
+        print("\n⚡ TEST 5: Performance and Edge Cases")
         print("-" * 50)
         
         try:
@@ -557,47 +509,12 @@ class TestResponseCurveGenerator:
         print("   • Spend-based response curve generation")
         print("   • Mathematically correct marker calculations")  
         print("   • Robust spend conversion functionality")
-        print("   • Professional MPA-style visualizations")
-        print("   • CSV export with business-relevant metrics")
         print("   • Performance optimization and edge case handling")
 
 
-def demo_mpa_style_visualization():
-    """Quick demo of MPA-style visualization."""
-    print("\n🎨 BONUS: MPA-Style Visualization Demo")
-    print("-" * 50)
-    
-    try:
-        model = MockCompleteModel()
-        generator = ResponseCurveGenerator(model)
-        
-        response_curves, curve_metadata = generator.generate_response_curves(
-            max_multiplier=2.0,
-            num_steps=25,
-            aggregation_level="national"
-        )
-        
-        generator.plot_response_curves(
-            response_curves, curve_metadata,
-            figure_size=(12, 10),
-            save_plots=True
-        )
-        
-        print("✅ Demo visualization created successfully!")
-        print("📊 Features demonstrated:")
-        print("   • Individual subplots for each media channel")
-        print("   • Combined plot showing all channels together")
-        print("   • Historical average and half-saturation markers")
-        print("   • Professional number formatting and styling")
-        
-    except Exception as e:
-        print(f"⚠️  Demo visualization failed: {e}")
 
 
 if __name__ == "__main__":
     # Run comprehensive test suite
     test_suite = TestResponseCurveGenerator()
     test_suite.run_all_tests()
-    
-    # Run bonus demo
-    demo_mpa_style_visualization()

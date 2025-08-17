@@ -598,81 +598,6 @@ class ResponseCurveGenerator:
 
         return response_curves, curve_metadata
 
-    def export_response_curves(self, response_curves: dict, curve_metadata: dict, output_file: str = None):
-        """Export response curves with actual business metrics to CSV.
-
-        Args:
-            response_curves: Output from generate_response_curves()
-            curve_metadata: Metadata from generate_response_curves()
-            output_file: CSV filename for export (default: auto-generate based on aggregation level)
-        """
-
-        export_rows = []
-
-        if curve_metadata['aggregation_level'] == "national":
-            # National-level export
-            for channel_name, curve_data in response_curves.items():
-                for step_idx, multiplier in enumerate(curve_data['spend_multipliers']):
-                    actual_spend_val = curve_data['actual_spend'][step_idx]
-                    actual_impressions_val = curve_data['actual_impressions'][step_idx] 
-                    actual_kpi_val = curve_data['actual_kpi_contributions'][step_idx]
-                    
-                    row = {
-                        'channel': channel_name,
-                        'spend_multiplier': multiplier,
-                        'actual_spend': actual_spend_val,  # PRIMARY X-AXIS
-                        'actual_kpi_contribution': actual_kpi_val,  # Y-AXIS  
-                        'actual_impressions': actual_impressions_val,  # REFERENCE
-                        'scaled_impressions': curve_data['scaled_impressions'][step_idx],
-                        'scaled_effects': curve_data['scaled_effects'][step_idx],
-                        'kpi_per_spend': actual_kpi_val / actual_spend_val if actual_spend_val > 0 else 0,
-                        'kpi_per_impression': actual_kpi_val / actual_impressions_val if actual_impressions_val > 0 else 0
-                    }
-                    export_rows.append(row)
-
-        else:
-            # Geo-level export
-            for channel_name, curve_data in response_curves.items():
-                for geo_idx, geo_name in enumerate(curve_data['geo_names']):
-                    for step_idx, multiplier in enumerate(curve_data['spend_multipliers']):
-                        actual_spend_val = curve_data['actual_spend'][geo_idx, step_idx]
-                        actual_impressions_val = curve_data['actual_impressions'][geo_idx, step_idx]
-                        actual_kpi_val = curve_data['actual_kpi_contributions'][geo_idx, step_idx]
-                        
-                        row = {
-                            'channel': channel_name,
-                            'geo': geo_name,
-                            'geo_index': geo_idx,
-                            'spend_multiplier': multiplier,
-                            'actual_spend': actual_spend_val,  # PRIMARY X-AXIS
-                            'actual_kpi_contribution': actual_kpi_val,  # Y-AXIS
-                            'actual_impressions': actual_impressions_val,  # REFERENCE
-                            'scaled_impressions': curve_data['scaled_impressions'][geo_idx, step_idx],
-                            'scaled_effects': curve_data['scaled_effects'][geo_idx, step_idx],
-                            'kpi_per_spend': actual_kpi_val / actual_spend_val if actual_spend_val > 0 else 0,
-                            'kpi_per_impression': actual_kpi_val / actual_impressions_val if actual_impressions_val > 0 else 0
-                        }
-                        export_rows.append(row)
-
-        # Create and export DataFrame
-        curves_df = pd.DataFrame(export_rows)
-        
-        # Auto-generate filename if not provided
-        if output_file is None:
-            output_file = f"{curve_metadata['aggregation_level']}_response_curves.csv"
-        
-        # Save to CSV
-        curves_df.to_csv(output_file, index=False)
-
-        print(f"   ✅ Exported {len(curves_df)} rows to {output_file}")
-        print(f"   📊 Columns: {list(curves_df.columns)}")
-        print(f"   💰 Value ranges:")
-        if 'actual_spend' in curves_df.columns:
-            print(f"     Spend: [${curves_df['actual_spend'].min():.2f}, ${curves_df['actual_spend'].max():.2f}]")
-        print(f"     Impressions: [{curves_df['actual_impressions'].min():.0f}, {curves_df['actual_impressions'].max():.0f}]")
-        print(f"     KPI: [{curves_df['actual_kpi_contribution'].min():.2f}, {curves_df['actual_kpi_contribution'].max():.2f}]")
-
-        return curves_df
 
     def _calculate_key_spending_points(self) -> dict:
         """Calculate historical average and half-saturation spending points.
@@ -739,8 +664,7 @@ class ResponseCurveGenerator:
 
     def plot_response_curves(self, response_curves: dict, curve_metadata: dict, 
                            figure_size: tuple = (12, 12), n_columns: int = 1, 
-                           marker_size: int = 8, legend_fontsize: int = 8,
-                           save_plots: bool = True, output_dir: str = ".") -> None:
+                           marker_size: int = 8, legend_fontsize: int = 8) -> None:
         """Create response curve visualizations matching the MPA style.
 
         Args:
@@ -750,8 +674,6 @@ class ResponseCurveGenerator:
             n_columns: Number of columns in the subplot grid
             marker_size: Size of markers for key points
             legend_fontsize: Font size for legends
-            save_plots: If True, save plots to files
-            output_dir: Directory to save plots
         """
         try:
             import matplotlib.pyplot as plt
@@ -894,11 +816,6 @@ class ResponseCurveGenerator:
         last_ax.yaxis.set_major_formatter(mticker.FuncFormatter(format_large_numbers))
         last_ax.legend(fontsize=legend_fontsize, loc="lower right")
         
-        if save_plots:
-            filename = f"{output_dir}/response_curves_mpa_style.png"
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
-            print(f"   📊 Saved: {filename}")
-        
         plt.show()
         plt.close()
         
@@ -907,8 +824,6 @@ class ResponseCurveGenerator:
         print(f"   📈 Combined plot showing all channels together")
         print(f"   💡 Historical Avg (grey), Half Saturation (green)")
         print(f"   🔍 Using actual historical data for marker calculations")
-        if save_plots:
-            print(f"   💾 Plot saved to: {output_dir}")
 
     def generate_geo_media_scenarios(self,
                                    max_multiplier: float = 2.0,
@@ -1065,144 +980,7 @@ class ResponseCurveGenerator:
         summary_df = pd.DataFrame(summary_rows)
         return summary_df
 
-    def export_sample_data(self, media_scenarios: np.ndarray, metadata: dict,
-                          output_file: str = "geo_media_scenarios_sample.csv",
-                          include_actual_values: bool = True):
-        """Export sample scaled media scenarios for inspection.
 
-        Args:
-            media_scenarios: Output from generate_geo_media_scenarios.
-            metadata: Metadata from generate_geo_media_scenarios.
-            output_file: CSV filename for export.
-            include_actual_values: Whether to include actual impression values.
-        """
-        sample_rows = []
-
-        # Get actual impressions if requested
-        actual_impressions = None
-        if include_actual_values:
-            try:
-                actual_impressions, _ = self.reverse_transform_media_scenarios(
-                    media_scenarios, metadata
-                )
-                print(f"   ✅ Including actual impression values in export")
-            except Exception as e:
-                print(f"   ⚠️  Could not compute actual impressions for export: {str(e)}")
-                include_actual_values = False
-
-        # Sample every 5th step to keep file manageable
-        step_sample = range(0, metadata['num_steps'], max(1, metadata['num_steps'] // 10))
-
-        for geo_idx in range(min(5, metadata['n_geos'])):  # First 5 geos only
-            geo_name = metadata['geo_names'][geo_idx]
-
-            for step_idx in step_sample:
-                row = {
-                    'geo': geo_name,
-                    'geo_index': geo_idx,
-                    'step': step_idx,
-                    'step_multiplier': step_idx / (metadata['num_steps'] - 1) * metadata['max_multiplier']
-                }
-
-                # Add scaled media and actual impressions for each channel
-                for channel_idx, channel_name in enumerate(metadata['channel_names']):
-                    scaled_value = media_scenarios[geo_idx, step_idx, channel_idx]
-                    row[f'{channel_name}_scaled_media'] = scaled_value
-
-                    if include_actual_values and actual_impressions is not None:
-                        actual_value = actual_impressions[geo_idx, step_idx, channel_idx]
-                        row[f'{channel_name}_actual_impressions'] = actual_value
-
-                sample_rows.append(row)
-
-        sample_df = pd.DataFrame(sample_rows)
-        sample_df.to_csv(output_file, index=False)
-        print(f"📄 Sample data exported to: {output_file}")
-        print(f"   Rows: {len(sample_df)}")
-        print(f"   Columns: {list(sample_df.columns)}")
-        print(f"   Value range: [{sample_df.select_dtypes(include=[np.number]).min().min():.6f}, {sample_df.select_dtypes(include=[np.number]).max().max():.3f}]")
-
-        return sample_df
-
-    def export_transformation_results(self,
-                                    media_scenarios: np.ndarray,
-                                    media_effects: np.ndarray,
-                                    metadata: dict,
-                                    output_file: str = "complete_transformation_results.csv"):
-        """Export complete transformation pipeline results including actual values.
-
-        Args:
-            media_scenarios: Scaled media scenarios from generate_geo_media_scenarios()
-            media_effects: Media effects from apply_media_transformations()
-            metadata: Metadata from generate_geo_media_scenarios()
-            output_file: CSV filename for export
-        """
-        print(f"📄 Exporting complete transformation results...")
-
-        # Get reverse transformations
-        try:
-            actual_impressions, _ = self.reverse_transform_media_scenarios(media_scenarios, metadata)
-            actual_kpi_effects, _ = self.reverse_transform_media_effects(media_effects, metadata)
-            reverse_success = True
-        except Exception as e:
-            print(f"   ⚠️  Could not compute reverse transformations: {str(e)}")
-            actual_impressions = media_scenarios.copy()
-            actual_kpi_effects = media_effects.copy()
-            reverse_success = False
-
-        export_rows = []
-
-        # Sample strategically to keep file manageable
-        step_sample = range(0, metadata['num_steps'], max(1, metadata['num_steps'] // 15))
-        geo_sample = range(0, min(10, metadata['n_geos']))  # First 10 geos
-
-        for geo_idx in geo_sample:
-            geo_name = metadata['geo_names'][geo_idx]
-
-            for step_idx in step_sample:
-                multiplier = step_idx / (metadata['num_steps'] - 1) * metadata['max_multiplier']
-
-                # Base row data
-                row = {
-                    'geo': geo_name,
-                    'geo_index': geo_idx,
-                    'step': step_idx,
-                    'step_multiplier': multiplier
-                }
-
-                # Add data for each channel
-                for channel_idx, channel_name in enumerate(metadata['channel_names']):
-                    # Scaled values
-                    scaled_media = media_scenarios[geo_idx, step_idx, channel_idx]
-                    scaled_effects = media_effects[geo_idx, step_idx, channel_idx]
-
-                    row.update({
-                        f'{channel_name}_scaled_media': scaled_media,
-                        f'{channel_name}_scaled_effects': scaled_effects
-                    })
-
-                    # Actual values if available
-                    if reverse_success:
-                        actual_impressions_val = actual_impressions[geo_idx, step_idx, channel_idx]
-                        actual_kpi_val = actual_kpi_effects[geo_idx, step_idx, channel_idx]
-
-                        row.update({
-                            f'{channel_name}_actual_impressions': actual_impressions_val,
-                            f'{channel_name}_actual_kpi_contribution': actual_kpi_val
-                        })
-
-                export_rows.append(row)
-
-        # Create and export DataFrame
-        results_df = pd.DataFrame(export_rows)
-        results_df.to_csv(output_file, index=False)
-
-        print(f"   File: {output_file}")
-        print(f"   Rows: {len(results_df)}")
-        print(f"   Columns: {len(results_df.columns)}")
-        print(f"   Reverse transformations: {'✅ Included' if reverse_success else '❌ Failed'}")
-
-        return results_df
 
     def apply_media_transformations(self,
                                   media_scenarios: np.ndarray,
@@ -1407,10 +1185,7 @@ def test_geo_media_simulator(model_path: str):
         print(f"\n📊 Scaled Media Summary (first 10 rows):")
         print(summary.head(10).to_string(index=False))
 
-        # Export sample with actual values
-        sample_df = generator.export_sample_data(media_scenarios, metadata,
-                                                output_file="geo_media_scenarios_sample.csv",
-                                                include_actual_values=True)
+        # Get summary
 
         print(f"\n🔄 Testing media transformations...")
 
@@ -1430,12 +1205,7 @@ def test_geo_media_simulator(model_path: str):
             media_effects, metadata
         )
 
-        # Test the new complete export functionality
-        print(f"\n📄 Testing complete transformation export...")
-        complete_results_df = generator.export_transformation_results(
-            media_scenarios, media_effects, metadata,
-            output_file="complete_transformation_results.csv"
-        )
+        # Test reverse transformations completed
 
         # Test the new response curve generation
         print(f"\n🎯 Testing response curve generation...")
@@ -1445,11 +1215,7 @@ def test_geo_media_simulator(model_path: str):
             aggregation_level="national"
         )
 
-        # Export response curves
-        curves_df = generator.export_response_curves(
-            response_curves, curve_metadata,
-            output_file="national_response_curves.csv"
-        )
+        # Response curves completed
 
         print(f"\n✅ Test completed successfully!")
         print(f"📊 Key Validation:")
