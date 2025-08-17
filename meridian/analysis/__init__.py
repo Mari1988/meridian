@@ -15,6 +15,7 @@
 """Meridian analysis API for trained models."""
 
 from meridian.analysis import analyzer
+from meridian.analysis import fast_response_curves
 from meridian.analysis import formatter
 from meridian.analysis import optimizer
 from meridian.analysis import summarizer
