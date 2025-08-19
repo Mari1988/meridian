@@ -273,6 +273,16 @@ print(f"\nComplete dataset saved to: MDF_BY_GEO_EXPANDED_CLIENTS_Jul30_Channel_e
 print("Sample of complete data:")
 combined_data.head()
 
+# ------------------------------------------------------
+fp = "/Users/mariappan.subramanian/OneDrive - The Trade Desk/MMM/Media Parameter Analysis/Dev/MMMFeasibility/analysis/Partner_to_Advertiser.csv"
+advertiser_to_parnter_map = pd.read_csv(fp)
+
+# create a dictionary of advertiser_id to partner_id
+advertiser_to_parnter_map = dict(zip(advertiser_to_parnter_map['AdvertiserId'], advertiser_to_parnter_map['PartnerId']))
+
+
+
+
 
 
 # --------------------------------------------------
