@@ -82,10 +82,6 @@ class ResponseCurveGenerator:
         self.n_times = self.historical_scaled_media.shape[1]
         self.n_channels = self.historical_scaled_media.shape[2]
 
-        print(f"📊 Scaled media data extracted:")
-        print(f"   Shape: {self.historical_scaled_media.shape} (geos, times, channels)")
-        print(f"   Channels: {self.channel_names}")
-        print(f"   Value range: [{tf.reduce_min(self.historical_scaled_media, axis=[0,1])}, {tf.reduce_max(self.historical_scaled_media, axis=[0,1])}]")
 
     def _extract_median_parameters(self):
         """Extract median parameter values from posterior samples for transformations."""
@@ -121,14 +117,6 @@ class ResponseCurveGenerator:
         # Extract max_lag for transformations
         self.max_lag = self.model.model_spec.max_lag if hasattr(self.model, 'model_spec') else 8
 
-        print(f"📊 Median parameters extracted:")
-        if self.media_params:
-            print(f"   Media channels: {len(self.media_params['ec'])} params")
-            print(f"   Alpha range: [{self.media_params['alpha'].min():.3f}, {self.media_params['alpha'].max():.3f}]")
-            print(f"   EC range: [{self.media_params['ec'].min():.3f}, {self.media_params['ec'].max():.3f}]")
-        if self.rf_params:
-            print(f"   R&F channels: {len(self.rf_params['ec'])} params")
-        print(f"   Max lag (adstock): {self.max_lag}")
 
     def reverse_transform_media_scenarios(self, media_scenarios: np.ndarray, metadata: dict) -> Tuple[np.ndarray, np.ndarray, dict]:
         """Convert scaled media scenarios back to actual impressions/reach values and spend.
@@ -146,7 +134,6 @@ class ResponseCurveGenerator:
                           Shape: (n_geos, n_steps, n_channels)
             - reverse_metadata: dict with reverse transformation information including spend data
         """
-        print(f"🔄 Converting scaled media scenarios to actual impressions...")
 
         # Extract media transformer scale factors
         media_scale_factors = None
@@ -157,15 +144,13 @@ class ResponseCurveGenerator:
             self.model.media_tensors.media_transformer is not None):
             media_transformer = self.model.media_tensors.media_transformer
             media_scale_factors = media_transformer._scale_factors_gm.numpy()
-            print(f"   Media scale factors extracted: shape {media_scale_factors.shape}")
-
+    
         if (hasattr(self.model, 'rf_tensors') and
             hasattr(self.model.rf_tensors, 'reach_transformer') and
             self.model.rf_tensors.reach_transformer is not None):
             rf_transformer = self.model.rf_tensors.reach_transformer
             rf_scale_factors = rf_transformer._scale_factors_gm.numpy()
-            print(f"   R&F scale factors extracted: shape {rf_scale_factors.shape}")
-
+    
         # Initialize output array
         actual_impressions = np.zeros_like(media_scenarios)
 
@@ -181,9 +166,7 @@ class ResponseCurveGenerator:
                     actual_impressions[:, :, channel_idx] = (
                         media_scenarios[:, :, channel_idx] * scale_factors[:, np.newaxis]
                     )
-                    print(f"   {channel_name}: Applied media scale factors")
                 else:
-                    print(f"   ⚠️  {channel_name}: No media scale factors available")
                     actual_impressions[:, :, channel_idx] = media_scenarios[:, :, channel_idx]
 
             elif rf_scale_factors is not None:
@@ -194,12 +177,9 @@ class ResponseCurveGenerator:
                     actual_impressions[:, :, channel_idx] = (
                         media_scenarios[:, :, channel_idx] * scale_factors[:, np.newaxis]
                     )
-                    print(f"   {channel_name}: Applied R&F scale factors")
                 else:
-                    print(f"   ⚠️  {channel_name}: R&F channel index out of range")
                     actual_impressions[:, :, channel_idx] = media_scenarios[:, :, channel_idx]
             else:
-                print(f"   ⚠️  {channel_name}: No scale factors available")
                 actual_impressions[:, :, channel_idx] = media_scenarios[:, :, channel_idx]
 
         # Create reverse transformation metadata
@@ -228,9 +208,6 @@ class ResponseCurveGenerator:
                 'transformation_ratio': float(actual_values.max() / original_values.max()) if original_values.max() > 0 else 1.0
             })
 
-        print(f"✅ Reverse transformation completed:")
-        print(f"   Input range (scaled): [{media_scenarios.min():.3f}, {media_scenarios.max():.3f}]")
-        print(f"   Output range (actual): [{actual_impressions.min():.0f}, {actual_impressions.max():.0f}]")
 
         # Convert impressions to spend
         actual_spend, spend_metadata = self.convert_impressions_to_spend(actual_impressions, metadata)
@@ -256,11 +233,9 @@ class ResponseCurveGenerator:
                                 Shape: (n_geos, n_steps, n_channels)
             - kpi_metadata: dict with KPI transformation information
         """
-        print(f"🔄 Converting scaled media effects to actual KPI values...")
 
         # Extract KPI transformer
         if not hasattr(self.model, 'kpi_transformer') or self.model.kpi_transformer is None:
-            print(f"   ⚠️  No KPI transformer available in model")
             return media_effects.copy(), {'transformation_applied': False}
 
         kpi_transformer = self.model.kpi_transformer
@@ -270,10 +245,6 @@ class ResponseCurveGenerator:
         pop_scaled_mean = kpi_transformer._population_scaled_mean.numpy()
         pop_scaled_stdev = kpi_transformer._population_scaled_stdev.numpy()
 
-        print(f"   KPI transformer parameters:")
-        print(f"     Population scaled mean: {pop_scaled_mean:.6f}")
-        print(f"     Population scaled stdev: {pop_scaled_stdev:.6f}")
-        print(f"     Population shape: {population.shape}")
 
         # Apply inverse KPI transformation using correct difference method
         # IMPORTANT: KpiTransformer.inverse() expects (n_geos, n_times) - NOT (n_geos, n_times, n_channels)
@@ -330,9 +301,6 @@ class ResponseCurveGenerator:
                     'total_kpi_contribution': float(actual_contrib.sum())
                 })
 
-        print(f"✅ KPI reverse transformation completed:")
-        print(f"   Input range (scaled effects): [{media_effects.min():.6f}, {media_effects.max():.6f}]")
-        print(f"   Output range (actual KPI): [{actual_kpi_effects.min():.2f}, {actual_kpi_effects.max():.2f}]")
 
         return actual_kpi_effects, kpi_metadata
 
@@ -353,35 +321,27 @@ class ResponseCurveGenerator:
                           Shape: (n_geos, n_steps, n_channels)  
             - spend_metadata: dict with spend conversion information
         """
-        print(f"💰 Converting actual impressions to actual spend...")
         
         # Validate input
         if not hasattr(self.model, 'input_data'):
             raise ValueError("Model must have input_data for spend conversion")
         
         n_geos, n_steps, n_channels = actual_impressions.shape
-        print(f"   Input shape: {actual_impressions.shape}")
-        print(f"   Sample impressions (geo 0, step 0): {actual_impressions[0, 0, :]}")
         
         # Extract historical spend and impression data
         try:
             # Get historical spend data
             historical_spend = self.model.input_data.get_total_spend()  # (n_geos, n_times, n_channels)
-            print(f"   Historical spend shape: {historical_spend.shape}")
             
             # Get historical impression data (media + RF)
             historical_impressions = self.model.input_data.get_all_media_and_rf()  # (n_geos, n_times, n_channels)
-            print(f"   Historical impressions shape: {historical_impressions.shape}")
             
         except Exception as e:
-            print(f"   ❌ Error extracting historical data: {e}")
             # Fallback: use dummy CPM values
-            print(f"   Using fallback CPM values...")
             avg_cpm_per_geo_channel = np.full((n_geos, n_channels), 50.0)  # $50 CPM fallback
             
         else:
             # Calculate CPM per geo and channel: CPM = (spend / impressions) * 1000
-            print(f"   Calculating CPM from historical data...")
             
             # Avoid division by zero
             safe_impressions = np.where(historical_impressions == 0, np.nan, historical_impressions)
@@ -402,8 +362,6 @@ class ResponseCurveGenerator:
                         # Ultimate fallback
                         avg_cpm_per_geo_channel[nan_mask, ch] = 50.0
         
-        print(f"   CPM range: [${avg_cpm_per_geo_channel.min():.2f}, ${avg_cpm_per_geo_channel.max():.2f}]")
-        print(f"   Sample CPM (geo 0): {avg_cpm_per_geo_channel[0, :]} per channel")
         
         # Convert impressions to spend: spend = (impressions / 1000) × CPM
         actual_spend = np.zeros_like(actual_impressions)
@@ -447,10 +405,6 @@ class ResponseCurveGenerator:
                     'total_impressions': float(channel_impressions.sum())
                 })
         
-        print(f"✅ Spend conversion completed:")
-        print(f"   Input range (impressions): [{actual_impressions.min():,.0f}, {actual_impressions.max():,.0f}]")
-        print(f"   Output range (spend): [${actual_spend.min():,.2f}, ${actual_spend.max():,.2f}]")
-        print(f"   Average spend per impression: ${(actual_spend.sum() / actual_impressions.sum()):.6f}")
         
         return actual_spend, spend_metadata
 
@@ -473,26 +427,19 @@ class ResponseCurveGenerator:
             - response_curves: Dict with actual spend levels (X-axis) and KPI contributions (Y-axis)
             - curve_metadata: Dict with response curve information
         """
-        print(f"🎯 Generating response curves with actual business metrics...")
-        print(f"   Aggregation level: {aggregation_level}")
-        print(f"   Multiplier range: 0 to {max_multiplier}x")
-        print(f"   Curve resolution: {num_steps} points")
 
         # Step 1: Generate scaled media scenarios
-        print(f"\n📊 Step 1: Generating scaled media scenarios...")
         media_scenarios, scenario_metadata = self.generate_geo_media_scenarios(
             max_multiplier=max_multiplier,
             num_steps=num_steps
         )
 
         # Step 2: Apply media transformations
-        print(f"\n🔄 Step 2: Applying media transformations...")
         media_effects, transform_metadata = self.apply_media_transformations(
             media_scenarios, scenario_metadata
         )
 
         # Step 3: Reverse transform to actual business metrics
-        print(f"\n💼 Step 3: Converting to actual business metrics...")
         actual_impressions, actual_spend, impression_metadata = self.reverse_transform_media_scenarios(
             media_scenarios, scenario_metadata
         )
@@ -502,17 +449,12 @@ class ResponseCurveGenerator:
         )
 
         # Step 4: Aggregate across geographies
-        print(f"\n🌍 Step 4: Aggregating across geographies...")
         if aggregation_level == "national":
             # Sum across geos (axis=0) to get national totals
             national_impressions = np.sum(actual_impressions, axis=0)  # Shape: (n_steps, n_channels)
             national_spend = np.sum(actual_spend, axis=0)  # Shape: (n_steps, n_channels)
             national_kpi_effects = np.sum(actual_kpi_effects, axis=0)  # Shape: (n_steps, n_channels)
 
-            print(f"   ✅ Aggregated to national level")
-            print(f"   National impression range: [{national_impressions.min():.0f}, {national_impressions.max():.0f}]")
-            print(f"   National spend range: [${national_spend.min():,.2f}, ${national_spend.max():,.2f}]")
-            print(f"   National KPI effect range: [{national_kpi_effects.min():.2f}, {national_kpi_effects.max():.2f}]")
 
             # Create response curves data structure
             response_curves = {}
@@ -529,7 +471,6 @@ class ResponseCurveGenerator:
                     'scaled_effects': np.sum(media_effects, axis=0)[:, channel_idx]
                 }
 
-                print(f"   📈 {channel_name}: ${national_spend[:, channel_idx].max():,.0f} max spend → ${national_kpi_effects[:, channel_idx].max():.0f} max KPI")
 
         else:  # geo-level
             # Keep geo dimension for geo-level analysis
@@ -591,10 +532,6 @@ class ResponseCurveGenerator:
                 'efficiency_at_max': float(max_kpi / max_impressions) if max_impressions > 0 else 0.0
             })
 
-        print(f"\n✅ Response curves generated successfully!")
-        print(f"   📊 Channels: {len(response_curves)}")
-        print(f"   📈 Data points per curve: {num_steps}")
-        print(f"   💰 Business metrics: Actual impressions & KPI contributions")
 
         return response_curves, curve_metadata
 
@@ -636,10 +573,6 @@ class ResponseCurveGenerator:
                 'half_saturation_range': [float(half_saturation_spend.min()), float(half_saturation_spend.max())]
             }
             
-            print(f"📊 Key spending points calculated:")
-            print(f"   Historical average spend: [{historical_avg_spend.min():,.0f}, {historical_avg_spend.max():,.0f}]")
-            print(f"   Half-saturation spend: [{half_saturation_spend.min():,.0f}, {half_saturation_spend.max():,.0f}]")
-            print(f"   EC values used: {[f'{x:.3f}' for x in ec_values]}")
             
             return {
                 'historical_avg_spend': historical_avg_spend,
@@ -648,8 +581,6 @@ class ResponseCurveGenerator:
             }
             
         except Exception as e:
-            print(f"⚠️  Could not calculate key spending points: {e}")
-            print(f"   Falling back to default estimates")
             
             # Fallback to reasonable defaults
             n_channels = len(self.channel_names)
@@ -663,13 +594,15 @@ class ResponseCurveGenerator:
             }
 
     def plot_response_curves(self, response_curves: dict, curve_metadata: dict, 
-                           figure_size: tuple = (12, 12), n_columns: int = 1, 
-                           marker_size: int = 8, legend_fontsize: int = 8) -> None:
+                           client_name: str = "", figure_size: tuple = (12, 12), 
+                           n_columns: int = 1, marker_size: int = 8, 
+                           legend_fontsize: int = 8) -> None:
         """Create response curve visualizations matching the MPA style.
 
         Args:
             response_curves: Output from generate_response_curves()
             curve_metadata: Metadata from generate_response_curves()
+            client_name: Client name to prepend to chart title (e.g., "Allergan")
             figure_size: Size of the figure (width, height)
             n_columns: Number of columns in the subplot grid
             marker_size: Size of markers for key points
@@ -680,7 +613,7 @@ class ResponseCurveGenerator:
             import seaborn as sns
             import matplotlib.ticker as mticker
         except ImportError:
-            print("❌ Matplotlib/Seaborn not available. Install with: pip install matplotlib seaborn")
+            raise ImportError("Matplotlib/Seaborn not available. Install with: pip install matplotlib seaborn")
             return
 
         # Helper function for number formatting
@@ -722,6 +655,13 @@ class ResponseCurveGenerator:
         for i, (channel_name, curve_data) in enumerate(response_curves.items()):
             ax = fig.add_subplot(n_rows, n_columns, i + 1)
             
+            # Find the correct channel index by name (not by enumeration index!)
+            try:
+                channel_idx = self.channel_names.index(channel_name)
+            except ValueError:
+                # Channel name not found in original channel list
+                channel_idx = -1
+            
             spend_data = curve_data['actual_spend']
             kpi_data = curve_data['actual_kpi_contributions']
             
@@ -747,7 +687,8 @@ class ResponseCurveGenerator:
             if len(spend_data) > 5:  # Only add markers if we have enough data points
                 
                 # Historical Average (actual historical average spend)
-                hist_spend_target = historical_avg_spend[i]
+                # Use channel_idx instead of enumeration index i
+                hist_spend_target = historical_avg_spend[channel_idx] if channel_idx >= 0 and channel_idx < len(historical_avg_spend) else 0
                 hist_idx = np.argmin(np.abs(spend_data - hist_spend_target))
                 hist_spend = spend_data[hist_idx]
                 hist_kpi = kpi_data[hist_idx]
@@ -775,7 +716,8 @@ class ResponseCurveGenerator:
                 )
                 
                 # Half Saturation (ec_50 * historical_median)
-                half_spend_target = half_saturation_spend[i]
+                # Use channel_idx instead of enumeration index i
+                half_spend_target = half_saturation_spend[channel_idx] if channel_idx >= 0 and channel_idx < len(half_saturation_spend) else 0
                 half_sat_idx = np.argmin(np.abs(spend_data - half_spend_target))
                 half_spend = spend_data[half_sat_idx]
                 half_kpi = kpi_data[half_sat_idx]
@@ -801,6 +743,42 @@ class ResponseCurveGenerator:
                     color="green"
                 )
             
+            # Add media parameter values as text annotation (only for individual plots)
+            param_text_lines = []
+            
+            # Get parameters for this channel (handle both media and RF channels)
+            if channel_idx >= 0 and channel_idx < len(self.media_params.get('alpha', [])):
+                # Standard media channel parameters
+                adstock_rate = self.media_params['alpha'][channel_idx]
+                ec_50 = self.media_params['ec'][channel_idx]
+                shape = self.media_params['slope'][channel_idx]
+                
+                param_text_lines = [
+                    f"Adstock: {adstock_rate:.2f}",
+                    f"Inflexion: {ec_50:.2f}",
+                    f"Shape: {shape:.2f}"
+                ]
+            elif channel_idx >= 0 and self.rf_params and (channel_idx - len(self.media_params.get('alpha', []))) < len(self.rf_params.get('alpha', [])):
+                # R&F channel parameters
+                rf_idx = channel_idx - len(self.media_params.get('alpha', []))
+                adstock_rate = self.rf_params['alpha'][rf_idx]
+                ec_50 = self.rf_params['ec'][rf_idx]
+                shape = self.rf_params['slope'][rf_idx]
+                
+                param_text_lines = [
+                    f"Adstock: {adstock_rate:.2f}",
+                    f"Inflexion: {ec_50:.2f}",
+                    f"Shape: {shape:.2f}"
+                ]
+            
+            # Add parameter text if available
+            if param_text_lines:
+                param_text = '\n'.join(param_text_lines)
+                ax.text(0.02, 0.98, param_text, transform=ax.transAxes, 
+                       verticalalignment='top', horizontalalignment='left',
+                       bbox=dict(boxstyle='round', facecolor='white', edgecolor='gray', alpha=1.0),
+                       fontsize=8)
+            
             # Format individual channel subplot
             ax.set_ylabel(kpi_label)
             ax.set_xlabel("Spend")
@@ -809,7 +787,8 @@ class ResponseCurveGenerator:
             ax.legend(fontsize=legend_fontsize, loc="lower right")
         
         # Format combined plot
-        fig.suptitle("Response curves", fontsize=20)
+        title = f"{client_name} - Response Curves" if client_name else "Response Curves"
+        fig.suptitle(title, fontsize=20)
         last_ax.set_ylabel(kpi_label)
         last_ax.set_xlabel("Spend per channel")
         last_ax.xaxis.set_major_formatter(mticker.FuncFormatter(format_large_numbers))
@@ -819,11 +798,6 @@ class ResponseCurveGenerator:
         plt.show()
         plt.close()
         
-        print(f"\n✅ MPA-style response curve visualizations created!")
-        print(f"   📈 Individual channel plots with key saturation markers")
-        print(f"   📈 Combined plot showing all channels together")
-        print(f"   💡 Historical Avg (grey), Half Saturation (green)")
-        print(f"   🔍 Using actual historical data for marker calculations")
 
     def generate_geo_media_scenarios(self,
                                    max_multiplier: float = 2.0,
@@ -846,9 +820,6 @@ class ResponseCurveGenerator:
             - media_scenarios: numpy array of shape (n_geos, num_steps, n_channels)
             - metadata: dict with information about the simulation
         """
-        print(f"🗺️ Generating geo-level scaled media scenarios...")
-        print(f"   Max multiplier: {max_multiplier}x")
-        print(f"   Steps per geo: {num_steps}")
 
         # Apply geo filtering if specified
         scaled_media_data = self.historical_scaled_media
@@ -858,22 +829,17 @@ class ResponseCurveGenerator:
             geo_indices = [i for i, geo in enumerate(geo_names) if geo in selected_geos]
             scaled_media_data = tf.gather(scaled_media_data, geo_indices, axis=0)
             geo_names = [geo_names[i] for i in geo_indices]
-            print(f"   Filtered to {len(selected_geos)} geos: {selected_geos}")
 
         # Apply time filtering if specified
         if selected_times is not None:
             time_names = self.model.input_data.time.values.tolist()
             time_indices = [i for i, time in enumerate(time_names) if str(time) in selected_times]
             scaled_media_data = tf.gather(scaled_media_data, time_indices, axis=1)
-            print(f"   Filtered to {len(selected_times)} time periods")
 
         # Calculate maximum scaled media per geo per channel
         # Shape: (n_geos, n_channels)
         geo_max_scaled_media = tf.reduce_max(scaled_media_data, axis=1)
 
-        print(f"   Historical scaled media shape: {scaled_media_data.shape}")
-        print(f"   Geo max scaled media shape: {geo_max_scaled_media.shape}")
-        print(f"   Scaled media range: [{tf.reduce_min(geo_max_scaled_media).numpy():.3f}, {tf.reduce_max(geo_max_scaled_media).numpy():.3f}]")
 
         # Generate scaled media scenarios for each geo independently
         final_n_geos = geo_max_scaled_media.shape[0]
@@ -912,10 +878,6 @@ class ResponseCurveGenerator:
             'simulation_range': [0.0, float(tf.reduce_max(geo_max_scaled_media).numpy()) * max_multiplier]
         }
 
-        print(f"✅ Geo scaled media scenarios generated:")
-        print(f"   Output shape: {media_scenarios.shape} (geos, steps, channels)")
-        print(f"   Scaled media range per geo: 0 to {max_multiplier}x historical max")
-        print(f"   Max simulation values: {[f'{x:.3f}' for x in media_scenarios.max(axis=(0,1))]}")
 
         return media_scenarios, metadata
 
@@ -942,9 +904,7 @@ class ResponseCurveGenerator:
                 actual_impressions, reverse_metadata = self.reverse_transform_media_scenarios(
                     media_scenarios, metadata
                 )
-                print(f"   ✅ Including actual impression values in summary")
             except Exception as e:
-                print(f"   ⚠️  Could not compute actual impressions: {str(e)}")
                 include_actual_impressions = False
 
         for geo_idx in range(metadata['n_geos']):
@@ -1000,9 +960,6 @@ class ResponseCurveGenerator:
             - media_effects: Shape (n_geos, n_steps, n_channels) with transformed effects
             - transform_metadata: Dict with transformation information
         """
-        print(f"🔄 Applying media transformations...")
-        print(f"   Input shape: {media_scenarios.shape}")
-        print(f"   Channels: {metadata['channel_names']}")
 
         # Validate inputs
         if not self.media_params and not self.rf_params:
@@ -1085,10 +1042,6 @@ class ResponseCurveGenerator:
             'n_rf_channels': len(self.rf_params.get('ec', [])),
         }
 
-        print(f"✅ Media transformations applied:")
-        print(f"   Output shape: {media_effects.shape}")
-        print(f"   Value range: [{media_effects.min():.6f}, {media_effects.max():.3f}]")
-        print(f"   Transformation steps: {transform_metadata['transformation_steps']}")
 
         return media_effects, transform_metadata
 
