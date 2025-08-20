@@ -411,7 +411,8 @@ class ResponseCurveGenerator:
     def generate_response_curves(self,
                                max_multiplier: float = 2.0,
                                num_steps: int = 50,
-                               aggregation_level: str = "national") -> Tuple[dict, dict]:
+                               aggregation_level: str = "national",
+                               use_historical: bool = False) -> Tuple[dict, dict]:
         """Generate response curves with actual business metrics by aggregating across geos.
 
         This is the main method for creating response curves that shows the relationship
@@ -421,6 +422,8 @@ class ResponseCurveGenerator:
             max_multiplier: Maximum spend multiplier (default 2.0 = 200% of historical max)
             num_steps: Number of points in the response curve
             aggregation_level: "national" (sum across geos) or "geo" (keep geo-level)
+            use_historical: If True, use historical scaled media data directly instead of 
+                          generating simulation scenarios (default False).
 
         Returns:
             Tuple containing:
@@ -431,11 +434,12 @@ class ResponseCurveGenerator:
         # Step 1: Generate scaled media scenarios
         media_scenarios, scenario_metadata = self.generate_geo_media_scenarios(
             max_multiplier=max_multiplier,
-            num_steps=num_steps
+            num_steps=num_steps,
+            use_historical=use_historical
         )
 
         # Step 2: Apply media transformations
-        media_effects, transform_metadata = self.apply_media_transformations(
+        adstocked_effects, saturated_effects, media_effects, transform_metadata = self.apply_media_transformations(
             media_scenarios, scenario_metadata
         )
 
@@ -693,13 +697,13 @@ class ResponseCurveGenerator:
                 hist_spend = spend_data[hist_idx]
                 hist_kpi = kpi_data[hist_idx]
                 
-                # Format label
-                if hist_spend >= 1e6:
-                    label_formatted = f"{hist_spend/1e6:.1f}M"
-                elif hist_spend >= 1e3:
-                    label_formatted = f"{hist_spend/1e3:.1f}K"
+                # Format label using calculated target value (not marker position)
+                if hist_spend_target >= 1e6:
+                    label_formatted = f"{hist_spend_target/1e6:.1f}M"
+                elif hist_spend_target >= 1e3:
+                    label_formatted = f"{hist_spend_target/1e3:.1f}K"
                 else:
-                    label_formatted = f"{hist_spend:.0f}"
+                    label_formatted = f"{hist_spend_target:.0f}"
                 
                 ax.plot(
                     hist_spend, hist_kpi,
@@ -722,12 +726,13 @@ class ResponseCurveGenerator:
                 half_spend = spend_data[half_sat_idx]
                 half_kpi = kpi_data[half_sat_idx]
                 
-                if half_spend >= 1e6:
-                    label_formatted = f"{half_spend/1e6:.1f}M"
-                elif half_spend >= 1e3:
-                    label_formatted = f"{half_spend/1e3:.1f}K"
+                # Format label using calculated target value (not marker position)
+                if half_spend_target >= 1e6:
+                    label_formatted = f"{half_spend_target/1e6:.1f}M"
+                elif half_spend_target >= 1e3:
+                    label_formatted = f"{half_spend_target/1e3:.1f}K"
                 else:
-                    label_formatted = f"{half_spend:.0f}"
+                    label_formatted = f"{half_spend_target:.0f}"
                 
                 ax.plot(
                     half_spend, half_kpi,
@@ -798,12 +803,182 @@ class ResponseCurveGenerator:
         plt.show()
         plt.close()
         
+    def plot_transformations(self, 
+                            media_scenarios: np.ndarray, 
+                            adstocked_effects: np.ndarray, 
+                            saturated_effects: np.ndarray, 
+                            actual_kpi_effects: np.ndarray, 
+                            metadata: dict, 
+                            figure_size: tuple = (15, 10)) -> None:
+        """Plot time-series transformations when use_historical=True.
+        
+        Creates time-series plots showing the transformation pipeline over historical time periods.
+        Data is aggregated across geo dimension for national-level visualization.
+        
+        Args:
+            media_scenarios: Media scenarios array (n_geos, n_times, n_channels)
+            adstocked_effects: Adstocked effects array (n_geos, n_times, n_channels)  
+            saturated_effects: Saturated effects array (n_geos, n_times, n_channels)
+            actual_kpi_effects: Actual KPI effects array (n_geos, n_times, n_channels)
+            metadata: Metadata dict from generate_geo_media_scenarios()
+            figure_size: Size of the figure (width, height)
+            
+        Raises:
+            ValueError: If use_historical=False in metadata
+            ImportError: If matplotlib is not available
+        """
+        
+        # Import plotting libraries
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+            import seaborn as sns
+        except ImportError:
+            raise ImportError("Matplotlib/Seaborn not available. Install with: pip install matplotlib seaborn")
+        
+        # Validate inputs
+        if not metadata.get('use_historical', False):
+            raise ValueError("plot_transformations() requires use_historical=True. Current metadata shows use_historical=False.")
+        
+        print("🎨 Creating transformation time-series plots...")
+        
+        # Extract time coordinates from historical data
+        time_coords = self.model.input_data.time.values
+        
+        # Apply same time filtering that was used in scenarios generation
+        if metadata.get('selected_times') is not None:
+            time_names = [str(t) for t in time_coords]
+            selected_times = metadata['selected_times']
+            time_indices = [i for i, time_str in enumerate(time_names) if time_str in selected_times]
+            time_coords = time_coords[time_indices]
+        
+        # Validate array shapes match time coordinates
+        n_geos, n_times, n_channels = media_scenarios.shape
+        if len(time_coords) != n_times:
+            raise ValueError(f"Time coordinates length ({len(time_coords)}) doesn't match scenarios time dimension ({n_times})")
+        
+        # Aggregate across geo dimension (sum for national-level view)
+        print(f"   📊 Aggregating {n_geos} geos across {n_channels} channels over {n_times} time periods")
+        
+        national_media_scenarios = np.sum(media_scenarios, axis=0)      # Shape: (n_times, n_channels)
+        national_adstocked_effects = np.sum(adstocked_effects, axis=0)  # Shape: (n_times, n_channels)
+        national_saturated_effects = np.sum(saturated_effects, axis=0)  # Shape: (n_times, n_channels)
+        national_kpi_effects = np.sum(actual_kpi_effects, axis=0)       # Shape: (n_times, n_channels)
+        
+        channel_names = metadata['channel_names']
+        print(f"   📈 Creating plots for channels: {channel_names}")
+        
+        # Set up plotting style
+        plt.style.use('default')
+        
+        # Create separate figure for each channel (cleaner visualization)
+        for channel_idx, channel_name in enumerate(channel_names):
+            print(f"   📊 Creating plots for {channel_name}...")
+            
+            # Create figure with 2 subplots for this channel
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), tight_layout=True)
+            
+            # Plot A: Media Scenarios vs Adstocked Effects for this channel
+            ax1.set_title(f"{channel_name}: Raw Media → Adstocked Effects (Carryover)", fontsize=14, fontweight='bold')
+            
+            ax1.plot(time_coords, national_media_scenarios[:, channel_idx], 
+                    label="Raw Media (Scaled)", 
+                    color='#2E86AB', 
+                    linewidth=2.5, 
+                    linestyle='-')
+            
+            ax1.plot(time_coords, national_adstocked_effects[:, channel_idx], 
+                    label="Adstocked (with Carryover)", 
+                    color='#A23B72', 
+                    linewidth=2.5, 
+                    linestyle='-', 
+                    alpha=0.9)
+            
+            ax1.set_ylabel("National Aggregated Values", fontsize=12)
+            ax1.legend(loc='upper right', fontsize=10)
+            # Remove grid lines as requested
+            
+            # Plot B: Scatter plot of Adstocked Effects vs KPI Contributions
+            ax2.set_title(f"{channel_name}: Adstocked Effects vs KPI Contributions", fontsize=14, fontweight='bold')
+            
+            # Create scatter plot with Adstocked Effects on X-axis and KPI Contributions on Y-axis
+            ax2.scatter(national_adstocked_effects[:, channel_idx], 
+                       national_kpi_effects[:, channel_idx],
+                       alpha=0.6,
+                       s=50,  # marker size
+                       color='#2E86AB',  # blue color
+                       edgecolors='white',
+                       linewidth=0.5,
+                       label="Adstock → KPI Relationship")
+            
+            ax2.set_xlabel("Adstocked Effects", fontsize=12)
+            ax2.set_ylabel("KPI Contributions", fontsize=12)
+            ax2.legend(loc='upper right', fontsize=10)
+            
+            # Remove grid lines explicitly for clean appearance
+            ax1.grid(False)
+            ax2.grid(False)
+            
+            # Format X-axis for time-series plot (ax1 only, since ax2 is now a scatter plot)
+            # Use proper datetime detection for numpy datetime64 objects
+            if np.issubdtype(time_coords.dtype, np.datetime64):
+                # Use yearly intervals to significantly reduce clutter
+                ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+                ax1.xaxis.set_major_locator(mdates.YearLocator(interval=1))  # Yearly ticks
+                # No rotation needed for years
+                plt.setp(ax1.xaxis.get_majorticklabels(), rotation=0, ha='center')
+            else:
+                # For string time coordinates (like '2024-01-06'), convert to datetime and format as 'YYYY MMM'
+                from matplotlib.ticker import FixedLocator, FixedFormatter
+                import pandas as pd
+                
+                # Convert string dates to datetime for better formatting
+                try:
+                    # Convert string dates to pandas datetime for formatting
+                    time_dates = pd.to_datetime(time_coords)
+                    
+                    # Create custom labels in 'YYYY MMM' format
+                    formatted_labels = [date.strftime('%Y %b') for date in time_dates]
+                    
+                    # Select evenly spaced indices for cleaner display (about 8-10 ticks)
+                    n_ticks = min(10, len(time_coords))
+                    tick_indices = np.linspace(0, len(time_coords) - 1, n_ticks, dtype=int)
+                    
+                    # Set fixed ticks and labels for time-series plot only
+                    ax1.xaxis.set_major_locator(FixedLocator(tick_indices))
+                    ax1.xaxis.set_major_formatter(FixedFormatter([formatted_labels[i] for i in tick_indices]))
+                    
+                except (ValueError, TypeError):
+                    # Fallback to simple MaxNLocator if date parsing fails
+                    from matplotlib.ticker import MaxNLocator
+                    ax1.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
+                
+                plt.setp(ax1.xaxis.get_majorticklabels(), rotation=0, ha='center')
+            
+            # For scatter plot (ax2), use default numeric formatting since X-axis is now Adstocked Effects
+            # No special date formatting needed for scatter plot
+            
+            # Add overall title for this channel
+            fig.suptitle(f"{channel_name} - Transformation Pipeline Over Time", fontsize=16, fontweight='bold')
+            
+            plt.show()
+            plt.close()
+            
+        print(f"   ✅ All channel plots created successfully!")
+        print(f"   📊 Plot features:")
+        print(f"      - Individual plots per channel (no clutter)")
+        print(f"      - First plot: Time-series with YYYY MMM date format")
+        print(f"      - Second plot: Scatter plot (Adstocked Effects vs KPI Contributions)")
+        print(f"      - No grid lines for cleaner appearance")
+        print(f"      - Professional styling and colors")
+        
 
     def generate_geo_media_scenarios(self,
                                    max_multiplier: float = 2.0,
                                    num_steps: int = 50,
                                    selected_geos: Optional[Sequence[str]] = None,
-                                   selected_times: Optional[Sequence[str]] = None) -> Tuple[np.ndarray, dict]:
+                                   selected_times: Optional[Sequence[str]] = None,
+                                   use_historical: bool = False) -> Tuple[np.ndarray, dict]:
         """Generate geo-level scaled media scenarios from 0 to max_multiplier * geo_max_scaled_media.
 
         For each geography, creates scaled media ranges from 0 to max_multiplier times the
@@ -814,11 +989,14 @@ class ResponseCurveGenerator:
             num_steps: Number of scaled media steps to generate per geo.
             selected_geos: Optional subset of geographies to include.
             selected_times: Optional subset of time periods to consider.
+            use_historical: If True, use historical scaled media data directly instead of 
+                          generating simulation scenarios (default False).
 
         Returns:
             Tuple containing:
             - media_scenarios: numpy array of shape (n_geos, num_steps, n_channels)
-            - metadata: dict with information about the simulation
+                             where num_steps is either simulated steps or historical time periods
+            - metadata: dict with information about the simulation or historical data
         """
 
         # Apply geo filtering if specified
@@ -836,47 +1014,73 @@ class ResponseCurveGenerator:
             time_indices = [i for i, time in enumerate(time_names) if str(time) in selected_times]
             scaled_media_data = tf.gather(scaled_media_data, time_indices, axis=1)
 
-        # Calculate maximum scaled media per geo per channel
-        # Shape: (n_geos, n_channels)
-        geo_max_scaled_media = tf.reduce_max(scaled_media_data, axis=1)
+        if use_historical:
+            # Use historical scaled media data directly
+            media_scenarios = scaled_media_data.numpy()
+            final_n_geos = media_scenarios.shape[0]
+            actual_num_steps = media_scenarios.shape[1]  # Historical time periods
+            
+            # Create metadata for historical data
+            metadata = {
+                'use_historical': True,
+                'max_multiplier': max_multiplier,  # Not used but kept for compatibility
+                'num_steps': actual_num_steps,  # Actual historical time periods
+                'n_geos': final_n_geos,
+                'n_channels': self.n_channels,
+                'channel_names': self.channel_names,
+                'geo_names': geo_names,
+                'selected_geos': selected_geos,
+                'selected_times': selected_times,
+                'original_shape': self.historical_scaled_media.shape,
+                'final_shape': media_scenarios.shape,
+                'data_type': 'historical_scaled_media',
+                'value_range': [float(tf.reduce_min(scaled_media_data).numpy()),
+                              float(tf.reduce_max(scaled_media_data).numpy())],
+                'simulation_range': None  # Not applicable for historical data
+            }
+        else:
+            # Generate simulated scaled media scenarios
+            # Calculate maximum scaled media per geo per channel
+            # Shape: (n_geos, n_channels)
+            geo_max_scaled_media = tf.reduce_max(scaled_media_data, axis=1)
 
+            # Generate scaled media scenarios for each geo independently
+            final_n_geos = geo_max_scaled_media.shape[0]
+            media_scenarios = np.zeros((final_n_geos, num_steps, self.n_channels))
 
-        # Generate scaled media scenarios for each geo independently
-        final_n_geos = geo_max_scaled_media.shape[0]
-        media_scenarios = np.zeros((final_n_geos, num_steps, self.n_channels))
+            # Create scaled media ranges for each geo
+            for geo_idx in range(final_n_geos):
+                geo_max_media = geo_max_scaled_media[geo_idx].numpy()  # Shape: (n_channels,)
 
-        # Create scaled media ranges for each geo
-        for geo_idx in range(final_n_geos):
-            geo_max_media = geo_max_scaled_media[geo_idx].numpy()  # Shape: (n_channels,)
+                for channel_idx in range(self.n_channels):
+                    max_media_for_channel = geo_max_media[channel_idx]
 
-            for channel_idx in range(self.n_channels):
-                max_media_for_channel = geo_max_media[channel_idx]
+                    # Create linear range from 0 to max_multiplier * max_scaled_media
+                    media_range = np.linspace(
+                        start=0.0,
+                        stop=max_multiplier * max_media_for_channel,
+                        num=num_steps
+                    )
+                    media_scenarios[geo_idx, :, channel_idx] = media_range
 
-                # Create linear range from 0 to max_multiplier * max_scaled_media
-                media_range = np.linspace(
-                    start=0.0,
-                    stop=max_multiplier * max_media_for_channel,
-                    num=num_steps
-                )
-                media_scenarios[geo_idx, :, channel_idx] = media_range
-
-        # Create metadata
-        metadata = {
-            'max_multiplier': max_multiplier,
-            'num_steps': num_steps,
-            'n_geos': final_n_geos,
-            'n_channels': self.n_channels,
-            'channel_names': self.channel_names,
-            'geo_names': geo_names,
-            'selected_geos': selected_geos,
-            'selected_times': selected_times,
-            'original_shape': self.historical_scaled_media.shape,
-            'final_shape': media_scenarios.shape,
-            'data_type': 'scaled_media',
-            'value_range': [float(tf.reduce_min(geo_max_scaled_media).numpy()),
-                          float(tf.reduce_max(geo_max_scaled_media).numpy())],
-            'simulation_range': [0.0, float(tf.reduce_max(geo_max_scaled_media).numpy()) * max_multiplier]
-        }
+            # Create metadata for simulated data
+            metadata = {
+                'use_historical': False,
+                'max_multiplier': max_multiplier,
+                'num_steps': num_steps,
+                'n_geos': final_n_geos,
+                'n_channels': self.n_channels,
+                'channel_names': self.channel_names,
+                'geo_names': geo_names,
+                'selected_geos': selected_geos,
+                'selected_times': selected_times,
+                'original_shape': self.historical_scaled_media.shape,
+                'final_shape': media_scenarios.shape,
+                'data_type': 'scaled_media',
+                'value_range': [float(tf.reduce_min(geo_max_scaled_media).numpy()),
+                              float(tf.reduce_max(geo_max_scaled_media).numpy())],
+                'simulation_range': [0.0, float(tf.reduce_max(geo_max_scaled_media).numpy()) * max_multiplier]
+            }
 
 
         return media_scenarios, metadata
@@ -944,7 +1148,7 @@ class ResponseCurveGenerator:
 
     def apply_media_transformations(self,
                                   media_scenarios: np.ndarray,
-                                  metadata: dict) -> Tuple[np.ndarray, dict]:
+                                  metadata: dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
         """Apply adstock and hill transformations to scaled media scenarios.
 
         This method takes the output from generate_geo_media_scenarios() and applies
@@ -957,7 +1161,9 @@ class ResponseCurveGenerator:
 
         Returns:
             Tuple containing:
-            - media_effects: Shape (n_geos, n_steps, n_channels) with transformed effects
+            - adstocked_effects: Shape (n_geos, n_steps, n_channels) with adstock transformation
+            - saturated_effects: Shape (n_geos, n_steps, n_channels) with hill saturation  
+            - media_effects: Shape (n_geos, n_steps, n_channels) with final effects (beta coefficients)
             - transform_metadata: Dict with transformation information
         """
 
@@ -966,6 +1172,10 @@ class ResponseCurveGenerator:
             raise ValueError("No transformation parameters available. Check model fitting.")
 
         n_geos, n_steps, n_channels = media_scenarios.shape
+        
+        # Create arrays to store each transformation step
+        adstocked_effects = np.zeros_like(media_scenarios)
+        saturated_effects = np.zeros_like(media_scenarios)
         media_effects = np.zeros_like(media_scenarios)
 
         # Track transformation statistics
@@ -981,34 +1191,40 @@ class ResponseCurveGenerator:
             # Apply transformations to each channel
             geo_effects = []
             for channel_idx in range(n_channels):
+                original_channel_idx = channel_idx  # Keep original index for arrays
                 channel_name = metadata['channel_names'][channel_idx]
 
                 # Determine if this is a media or RF channel
                 if channel_idx < len(self.media_params.get('ec', [])):
                     # Standard media channel
                     params = self.media_params
+                    param_idx = channel_idx
                 elif self.rf_params and (channel_idx - len(self.media_params.get('ec', []))) < len(self.rf_params.get('ec', [])):
                     # R&F channel
                     params = self.rf_params
-                    channel_idx = channel_idx - len(self.media_params.get('ec', []))
+                    param_idx = channel_idx - len(self.media_params.get('ec', []))
                 else:
                     # No parameters for this channel
                     geo_effects.append(tf.zeros(n_steps))
                     continue
 
                 # Extract channel data: (n_steps,)
-                channel_media = geo_media_tensor[:, channel_idx]
+                channel_media = geo_media_tensor[:, original_channel_idx]
 
                 # Extract parameters for this channel
-                ec = params['ec'][channel_idx]
-                slope = params['slope'][channel_idx]
-                alpha = params['alpha'][channel_idx]
-                beta = params['beta'][geo_idx, channel_idx] if len(params['beta'].shape) > 1 else params['beta'][channel_idx]
+                ec = params['ec'][param_idx]
+                slope = params['slope'][param_idx]
+                alpha = params['alpha'][param_idx]
+                beta = params['beta'][geo_idx, param_idx] if len(params['beta'].shape) > 1 else params['beta'][param_idx]
 
                 # Apply transformations: media → adstock → hill → coefficients
                 adstocked = self._apply_adstock_transformation(channel_media, alpha)
                 saturated = self._apply_hill_transformation(adstocked, ec, slope)
                 effects = saturated * beta
+
+                # Store intermediate transformation results for debugging
+                adstocked_effects[geo_idx, :, original_channel_idx] = adstocked.numpy()
+                saturated_effects[geo_idx, :, original_channel_idx] = saturated.numpy()
 
                 geo_effects.append(effects)
 
@@ -1035,15 +1251,27 @@ class ResponseCurveGenerator:
             'transformation_applied': True,
             'transformation_steps': ['adstock', 'hill', 'coefficients'],
             'input_shape': media_scenarios.shape,
-            'output_shape': media_effects.shape,
+            'output_shapes': {
+                'adstocked_effects': adstocked_effects.shape,
+                'saturated_effects': saturated_effects.shape,
+                'media_effects': media_effects.shape
+            },
+            'value_ranges': {
+                'adstocked_effects': [float(adstocked_effects.min()), float(adstocked_effects.max())],
+                'saturated_effects': [float(saturated_effects.min()), float(saturated_effects.max())],
+                'media_effects': [float(media_effects.min()), float(media_effects.max())]
+            },
             'channel_stats': transformation_stats,
-            'value_range': [float(media_effects.min()), float(media_effects.max())],
             'n_media_channels': len(self.media_params.get('ec', [])),
             'n_rf_channels': len(self.rf_params.get('ec', [])),
+            'debug_info': {
+                'intermediate_transformations_available': True,
+                'transformation_flow': 'media_scenarios → adstocked_effects → saturated_effects → media_effects'
+            }
         }
 
 
-        return media_effects, transform_metadata
+        return adstocked_effects, saturated_effects, media_effects, transform_metadata
 
     def _apply_adstock_transformation(self, media_data: tf.Tensor, alpha: float) -> tf.Tensor:
         """Apply adstock transformation using Meridian's logic.
