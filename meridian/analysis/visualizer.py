@@ -1631,6 +1631,101 @@ class MediaSummary:
         .rename(columns=columns_rename_dict)
     )
 
+  def summary_table_without_ci(
+      self,
+      include_prior: bool = True,
+      include_posterior: bool = True,
+      include_non_paid_channels: bool = False,
+  ) -> pd.DataFrame:
+    """Returns a formatted dataframe table of the summary metrics.
+
+    Mean and credible interval summary metrics are formatted as text.
+
+    Args:
+      include_prior: If True, prior distribution summary metrics are included.
+        One of `include_prior` and `include_posterior` must be True.
+      include_posterior: If True, posterior distribution summary metrics are
+        included. One of `include_prior` and `include_posterior` must be True.
+      include_non_paid_channels: Boolean. If `True`, non-paid channels (organic
+        media, organic reach and frequency, and non-media treatments) are
+        included in the summary but only the metrics independent of spend are
+        reported. If `False`, only the paid channels (media, reach and
+        frequency) are included but the summary contains also the metrics
+        dependent on spend. Default: `False`.
+
+    Returns:
+      pandas.DataFrame of formatted summary metrics.
+    """
+    if not (include_posterior or include_prior):
+      raise ValueError(
+          'At least one of `include_posterior` or `include_prior` must be True.'
+      )
+
+    use_revenue = self._meridian.input_data.revenue_per_kpi is not None
+    distribution = [c.PRIOR] * include_prior + [c.POSTERIOR] * include_posterior
+
+    percentage_metrics = [
+        c.PCT_OF_CONTRIBUTION,
+    ]
+    if include_non_paid_channels:
+      monetary_metrics = [c.INCREMENTAL_OUTCOME] * use_revenue
+      summary_metrics = self.get_all_summary_metrics()
+      columns_rename_dict = {
+          c.PCT_OF_CONTRIBUTION: summary_text.PCT_CONTRIBUTION_COL,
+          c.INCREMENTAL_OUTCOME: (
+              summary_text.INC_OUTCOME_COL
+              if use_revenue
+              else summary_text.INC_KPI_COL
+          ),
+      }
+      df = (
+          summary_metrics.sel(distribution=distribution)
+          .drop_sel(metric=c.MEDIAN)
+          .to_dataframe()
+          .rename({c.MEAN: 'central_tendency'})
+      )
+    else:  # not include_non_paid_channels
+      percentage_metrics.extend([
+          c.PCT_OF_IMPRESSIONS,
+          c.PCT_OF_SPEND,
+      ])
+      monetary_metrics = [c.CPM, c.CPIK] + [
+          c.SPEND,
+          c.INCREMENTAL_OUTCOME,
+      ] * use_revenue
+      summary_metrics = self.get_paid_summary_metrics()
+      columns_rename_dict = {
+          c.PCT_OF_IMPRESSIONS: summary_text.PCT_IMPRESSIONS_COL,
+          c.PCT_OF_SPEND: summary_text.PCT_SPEND_COL,
+          c.PCT_OF_CONTRIBUTION: summary_text.PCT_CONTRIBUTION_COL,
+          c.INCREMENTAL_OUTCOME: (
+              summary_text.INC_OUTCOME_COL
+              if use_revenue
+              else summary_text.INC_KPI_COL
+          ),
+      }
+      # Format CPIK to use median instead of mean.
+      df_mean = (
+          summary_metrics.drop_vars([c.CPIK])
+          .sel(distribution=distribution)
+          .drop_sel(metric=[c.MEDIAN, c.CI_LO, c.CI_HI])
+          .to_dataframe()
+          .rename({c.MEAN: 'central_tendency'})
+      )
+      df_median = (
+          summary_metrics[c.CPIK]
+          .sel(distribution=distribution)
+          .drop_sel(metric=[c.MEAN, c.CI_LO, c.CI_HI])
+          .to_dataframe()
+          .rename({c.MEDIAN: 'central_tendency'})
+      )
+      df = pd.concat([df_mean, df_median], axis=1)
+
+
+    return (
+        df.reset_index()
+    )
+
   def update_summary_metrics(
       self,
       confidence_level: float | None = None,
