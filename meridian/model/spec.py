@@ -72,8 +72,7 @@ class ModelSpec:
       before Hill. This argument does not apply to RF channels. Default:
       `False`.
     max_lag: An integer indicating the maximum number of lag periods (≥ `0`) to
-      include in the Adstock calculation. Can also be set to `None`, which is
-      equivalent to infinite max lag. Default: `8`.
+      include in the Adstock calculation. Default: `8`.
     unique_sigma_for_each_geo: A boolean indicating whether to use a unique
       residual variance for each geo. If `False`, then a single residual
       variance is used for all geos. Default: `False`.
@@ -202,6 +201,8 @@ class ModelSpec:
       `(n_non_media_channels,)` indicating the non-media variables for which the
       non-media value will be scaled by population. If `None`, then no non-media
       variables are scaled by population. Default: `None`.
+    adstock_decay_function: A string to specify the Adstock decay function.
+      Allowed values are 'geometric' and 'binomial'. Default is 'geometric'.
   """
 
   prior: prior_distribution.PriorDistribution = dataclasses.field(
@@ -209,7 +210,7 @@ class ModelSpec:
   )
   media_effects_dist: str = constants.MEDIA_EFFECTS_LOG_NORMAL
   hill_before_adstock: bool = False
-  max_lag: int | None = 8
+  max_lag: int = 8
   unique_sigma_for_each_geo: bool = False
   media_prior_type: str | None = None
   rf_prior_type: str | None = None
@@ -227,6 +228,7 @@ class ModelSpec:
   holdout_id: np.ndarray | None = None
   control_population_scaling_id: np.ndarray | None = None
   non_media_population_scaling_id: np.ndarray | None = None
+  adstock_decay_function: str = constants.GEOMETRIC_DECAY
 
   def __post_init__(self):
     # Validate media_effects_dist.

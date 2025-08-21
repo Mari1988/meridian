@@ -66,6 +66,7 @@ FREQUENCY = 'frequency'
 RF_IMPRESSIONS = 'rf_impressions'
 RF_SPEND = 'rf_spend'
 ORGANIC_MEDIA = 'organic_media'
+ORGANIC_RF = 'organic_rf'
 ORGANIC_REACH = 'organic_reach'
 ORGANIC_FREQUENCY = 'organic_frequency'
 NON_MEDIA_TREATMENTS = 'non_media_treatments'
@@ -315,6 +316,41 @@ RF_PARAMETER_NAMES = (
     BETA_RF,
     BETA_GRF,
 )
+ORGANIC_MEDIA_PARAMETER_NAMES = (
+    CONTRIBUTION_OM,
+    BETA_OM,
+    ETA_OM,
+    ALPHA_OM,
+    EC_OM,
+    SLOPE_OM,
+    BETA_GOM,
+)
+ORGANIC_RF_PARAMETER_NAMES = (
+    CONTRIBUTION_ORF,
+    BETA_ORF,
+    ETA_ORF,
+    ALPHA_ORF,
+    EC_ORF,
+    SLOPE_ORF,
+    BETA_GORF,
+)
+NON_MEDIA_PARAMETER_NAMES = (
+    CONTRIBUTION_N,
+    GAMMA_N,
+    XI_N,
+    GAMMA_GN,
+)
+ALL_NATIONAL_DETERMINISTIC_PARAMETER_NAMES = (
+    SLOPE_M,
+    SLOPE_OM,
+    XI_N,
+    XI_C,
+    ETA_M,
+    ETA_RF,
+    ETA_OM,
+    ETA_ORF,
+)
+
 
 MEDIA_PARAMETERS = (
     ROI_M,
@@ -501,10 +537,14 @@ ADSTOCK_HILL_FUNCTIONS = frozenset({
     'hill',
 })
 
+# Adstock decay functions.
+GEOMETRIC_DECAY = 'geometric'
+BINOMIAL_DECAY = 'binomial'
 
 # Distribution constants.
 DISTRIBUTION = 'distribution'
 DISTRIBUTION_TYPE = 'distribution_type'
+INDEPENDENT_MULTIVARIATE = 'IndependentMultivariate'
 PRIOR = 'prior'
 POSTERIOR = 'posterior'
 # Prior mean proportion of KPI incremental due to all media.

@@ -142,20 +142,6 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
             seed=0,
         )
     )
-    cls.input_data_national = (
-        data_test_utils.sample_input_data_non_revenue_revenue_per_kpi(
-            n_geos=1,
-            n_times=_N_TIMES,
-            n_media_times=_N_MEDIA_TIMES,
-            n_controls=_N_CONTROLS,
-            n_media_channels=_N_MEDIA_CHANNELS,
-            n_rf_channels=_N_RF_CHANNELS,
-            n_non_media_channels=_N_NON_MEDIA_CHANNELS,
-            n_organic_media_channels=_N_ORGANIC_MEDIA_CHANNELS,
-            n_organic_rf_channels=_N_ORGANIC_RF_CHANNELS,
-            seed=0,
-        )
-    )
     model_spec = spec.ModelSpec(max_lag=15)
     cls.meridian_media_and_rf = model.Meridian(
         input_data=cls.input_data_media_and_rf, model_spec=model_spec
@@ -165,10 +151,6 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
     cls.inference_data_media_and_rf = _build_inference_data(
         _TEST_SAMPLE_PRIOR_MEDIA_AND_RF_PATH,
         _TEST_SAMPLE_POSTERIOR_MEDIA_AND_RF_PATH,
-    )
-    cls.inference_data_national = _build_inference_data(
-        _TEST_SAMPLE_PRIOR_NATIONAL_PATH,
-        _TEST_SAMPLE_POSTERIOR_NATIONAL_PATH,
     )
     cls.enter_context(
         mock.patch.object(
@@ -1882,53 +1864,6 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
         atol=2e-3,
     )
 
-  @parameterized.product(
-      selected_geos=[None, ["geo_0"]],
-      selected_times=[None, ["2021-04-19", "2021-09-13", "2021-12-13"]],
-  )
-  @mock.patch.object(
-      model.Meridian,
-      "inference_data",
-      new_callable=mock.PropertyMock,
-  )
-  def test_predictive_accuracy_with_holdout_id_national_correct(
-      self, mock_inference_data, selected_geos, selected_times
-  ):
-    mock_inference_data.return_value = self.inference_data_national
-    input_data = self.input_data_national
-    n_times = len(input_data.time)
-    holdout_id = np.full([n_times], False)
-    holdout_id[np.random.choice(n_times, int(np.round(0.2 * n_times)))] = True
-    model_spec = spec.ModelSpec(holdout_id=holdout_id)  # Set holdout_id
-    meridian = model.Meridian(model_spec=model_spec, input_data=input_data)
-    analyzer_holdout_id = analyzer.Analyzer(meridian)
-    predictive_accuracy_dims_kwargs = {
-        "selected_geos": selected_geos,
-        "selected_times": selected_times,
-    }
-
-    predictive_accuracy_dataset = analyzer_holdout_id.predictive_accuracy(
-        **predictive_accuracy_dims_kwargs,
-    )
-    df = (
-        predictive_accuracy_dataset[constants.VALUE]
-        .to_dataframe()
-        .reset_index()
-    )
-
-    if not selected_times:
-      expected_values = (
-          test_utils.PREDICTIVE_ACCURACY_HOLDOUT_ID_NATIONAL_NO_TIMES
-      )
-    else:
-      expected_values = test_utils.PREDICTIVE_ACCURACY_HOLDOUT_ID_NATIONAL_TIMES
-
-    self.assertAllClose(
-        list(df[constants.VALUE]),
-        expected_values,
-        atol=2e-3,
-    )
-
   def test_response_curves_check_both_channel_types_returns_correct_spend(self):
     response_curve_data = self.analyzer_media_and_rf.response_curves(
         by_reach=False
@@ -2541,6 +2476,96 @@ class AnalyzerTest(tf.test.TestCase, parameterized.TestCase):
       self.analyzer_media_and_rf.get_aggregated_spend(
           selected_times, include_media=False, include_rf=False
       )
+
+
+class AnalyzerNationalTest(tf.test.TestCase, parameterized.TestCase):
+
+  @classmethod
+  def setUpClass(cls):
+    super(AnalyzerNationalTest, cls).setUpClass()
+    cls.input_data_national = (
+        data_test_utils.sample_input_data_non_revenue_revenue_per_kpi(
+            n_geos=1,
+            n_times=_N_TIMES,
+            n_media_times=_N_MEDIA_TIMES,
+            n_controls=_N_CONTROLS,
+            n_media_channels=_N_MEDIA_CHANNELS,
+            n_rf_channels=_N_RF_CHANNELS,
+            n_non_media_channels=_N_NON_MEDIA_CHANNELS,
+            n_organic_media_channels=_N_ORGANIC_MEDIA_CHANNELS,
+            n_organic_rf_channels=_N_ORGANIC_RF_CHANNELS,
+            seed=0,
+        )
+    )
+    n_times = len(cls.input_data_national.time)
+    holdout_id = np.full([n_times], False)
+    holdout_id[np.random.choice(n_times, int(np.round(0.2 * n_times)))] = True
+    model_spec = spec.ModelSpec(holdout_id=holdout_id)
+    cls.meridian_national = model.Meridian(
+        input_data=cls.input_data_national, model_spec=model_spec
+    )
+    cls.analyzer_national = analyzer.Analyzer(cls.meridian_national)
+
+    cls.inference_data_national = _build_inference_data(
+        _TEST_SAMPLE_PRIOR_NATIONAL_PATH,
+        _TEST_SAMPLE_POSTERIOR_NATIONAL_PATH,
+    )
+    cls.enter_context(
+        mock.patch.object(
+            model.Meridian,
+            "inference_data",
+            new=property(lambda unused_self: cls.inference_data_national),
+        )
+    )
+
+  def test_rhat_summary_national_correct(self):
+    rhat_summary = self.analyzer_national.rhat_summary()
+    self.assertEqual(rhat_summary.shape, (31, 7))
+    self.assertSetEqual(
+        set(rhat_summary.param),
+        set(
+            constants.COMMON_PARAMETER_NAMES
+            + constants.MEDIA_PARAMETER_NAMES
+            + constants.RF_PARAMETER_NAMES
+            + constants.ORGANIC_MEDIA_PARAMETER_NAMES
+            + constants.ORGANIC_RF_PARAMETER_NAMES
+            + constants.NON_MEDIA_PARAMETER_NAMES
+        )
+        - set(constants.ALL_NATIONAL_DETERMINISTIC_PARAMETER_NAMES),
+    )
+
+  @parameterized.product(
+      selected_geos=[None, ["geo_0"]],
+      selected_times=[None, ["2021-04-19", "2021-09-13", "2021-12-13"]],
+  )
+  def test_predictive_accuracy_with_holdout_id_national_correct(
+      self, selected_geos, selected_times
+  ):
+    predictive_accuracy_dims_kwargs = {
+        "selected_geos": selected_geos,
+        "selected_times": selected_times,
+    }
+    predictive_accuracy_dataset = self.analyzer_national.predictive_accuracy(
+        **predictive_accuracy_dims_kwargs,
+    )
+    df = (
+        predictive_accuracy_dataset[constants.VALUE]
+        .to_dataframe()
+        .reset_index()
+    )
+
+    if not selected_times:
+      expected_values = (
+          test_utils.PREDICTIVE_ACCURACY_HOLDOUT_ID_NATIONAL_NO_TIMES
+      )
+    else:
+      expected_values = test_utils.PREDICTIVE_ACCURACY_HOLDOUT_ID_NATIONAL_TIMES
+
+    self.assertAllClose(
+        list(df[constants.VALUE]),
+        expected_values,
+        atol=2e-3,
+    )
 
 
 class AnalyzerMediaOnlyTest(tf.test.TestCase, parameterized.TestCase):
@@ -5102,42 +5127,57 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
         "organic_media_1",
         "organic_media_2",
         "organic_media_3",
+        "organic_rf_ch_0",
     ]
     self.assertSameElements(expected_channels, actual_channels)
 
-  def test_adstock_decay_organic_math_correct(self):
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="organic_media",
+          channel_name="organic_media_0",
+          expected_ci_hi=test_utils.ORGANIC_ADSTOCK_DECAY_CI_HI,
+          expected_ci_lo=test_utils.ORGANIC_ADSTOCK_DECAY_CI_LO,
+          expected_mean=test_utils.ORGANIC_ADSTOCK_DECAY_MEAN,
+      ),
+      dict(
+          testcase_name="organic_rf",
+          channel_name="organic_rf_ch_0",
+          expected_ci_hi=test_utils.ORGANIC_RF_ADSTOCK_DECAY_CI_HI,
+          expected_ci_lo=test_utils.ORGANIC_RF_ADSTOCK_DECAY_CI_LO,
+          expected_mean=test_utils.ORGANIC_RF_ADSTOCK_DECAY_MEAN,
+      ),
+  )
+  def test_adstock_decay_organic_channels_math_correct(
+      self, channel_name, expected_ci_hi, expected_ci_lo, expected_mean
+  ):
     adstock_decay_dataframe = self.analyzer_non_paid.adstock_decay(
         confidence_level=constants.DEFAULT_CONFIDENCE_LEVEL
     )
 
-    target_organic_channel = "organic_media_0"
-    first_organic_channel_df = adstock_decay_dataframe[
-        adstock_decay_dataframe[constants.CHANNEL] == target_organic_channel
+    channel_df = adstock_decay_dataframe[
+        adstock_decay_dataframe[constants.CHANNEL] == channel_name
     ]
 
-    first_organic_channel_df = first_organic_channel_df.sort_values(
+    channel_df = channel_df.sort_values(
         by=[constants.DISTRIBUTION, constants.TIME_UNITS],
-        ascending=[
-            False,
-            True,
-        ],
+        ascending=[False, True],
     )
 
     self.assertAllClose(
-        list(first_organic_channel_df[constants.CI_HI])[:5],
-        test_utils.ORGANIC_ADSTOCK_DECAY_CI_HI,
+        list(channel_df[constants.CI_HI])[:5],
+        expected_ci_hi,
         atol=1e-3,
     )
 
     self.assertAllClose(
-        list(first_organic_channel_df[constants.CI_LO])[:5],
-        test_utils.ORGANIC_ADSTOCK_DECAY_CI_LO,
+        list(channel_df[constants.CI_LO])[:5],
+        expected_ci_lo,
         atol=1e-3,
     )
 
     self.assertAllClose(
-        list(first_organic_channel_df[constants.MEAN])[:5],
-        test_utils.ORGANIC_ADSTOCK_DECAY_MEAN,
+        list(channel_df[constants.MEAN])[:5],
+        expected_mean,
         atol=1e-3,
     )
 
@@ -5169,9 +5209,11 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
         "organic_media_2",
         "organic_media_3",
     }
+    expected_organic_rf = {"organic_rf_ch_0"}
     self.assertTrue(expected_paid_media.issubset(all_channels_present))
     self.assertTrue(expected_rf.issubset(all_channels_present))
     self.assertTrue(expected_organic_media.issubset(all_channels_present))
+    self.assertTrue(expected_organic_rf.issubset(all_channels_present))
     self.assertSetEqual(
         set(
             hill_table[hill_table[constants.CHANNEL_TYPE] == constants.MEDIA][
@@ -5196,52 +5238,82 @@ class AnalyzerOrganicMediaTest(tf.test.TestCase, parameterized.TestCase):
         ),
         expected_organic_media,
     )
+    self.assertSetEqual(
+        set(
+            hill_table[
+                hill_table[constants.CHANNEL_TYPE] == constants.ORGANIC_RF
+            ][constants.CHANNEL].unique()
+        ),
+        expected_organic_rf,
+    )
     self.assertTrue(hist_df.index.is_unique)
 
-  def test_hill_curves_curve_data_correct(self):
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="organic_media_test",
+          channel_name="organic_media_1",
+          expected_channel_type=constants.ORGANIC_MEDIA,
+      ),
+      dict(
+          testcase_name="organic_rf_test",
+          channel_name="organic_rf_ch_0",
+          expected_channel_type=constants.ORGANIC_RF,
+      ),
+  )
+  def test_hill_curves_curve_data_correct(
+      self, channel_name, expected_channel_type
+  ):
     hill_table = self.analyzer_non_paid.hill_curves()
 
-    organic_channel = "organic_media_1"
-    organic_df = (
+    df = (
         hill_table[
-            (hill_table[constants.CHANNEL] == organic_channel)
+            (hill_table[constants.CHANNEL] == channel_name)
             & (hill_table[constants.DISTRIBUTION] == constants.POSTERIOR)
         ]
         .sort_values(constants.MEDIA_UNITS)
         .dropna(subset=[constants.MEAN])
     )
 
-    self.assertFalse(organic_df.empty)
-    self.assertEqual(
-        organic_df[constants.CHANNEL_TYPE].iloc[0], constants.ORGANIC_MEDIA
-    )
-    self.assertTrue(organic_df[constants.MEAN].is_monotonic_increasing)
-    self.assertLessEqual(organic_df[constants.MEAN].iloc[-1], 1.0)
-    self.assertGreaterEqual(organic_df[constants.MEAN].iloc[0], 0.0)
-    self.assertLess(organic_df[constants.MEDIA_UNITS].iloc[0], 0.1)
-    self.assertAlmostEqual(organic_df[constants.MEAN].iloc[0], 0.0, delta=1e-3)
+    self.assertFalse(df.empty)
+    self.assertEqual(df[constants.CHANNEL_TYPE].iloc[0], expected_channel_type)
+    self.assertTrue(df[constants.MEAN].is_monotonic_increasing)
+    self.assertLessEqual(df[constants.MEAN].iloc[-1], 1.0)
+    self.assertGreaterEqual(df[constants.MEAN].iloc[0], 0.0)
+    self.assertLess(df[constants.MEDIA_UNITS].iloc[0], 0.1)
+    self.assertAlmostEqual(df[constants.MEAN].iloc[0], 0.0, delta=1e-3)
 
-  def test_hill_curves_histogram_data_correct(self):
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="organic_media_test",
+          channel_name="organic_media_0",
+          expected_channel_type=constants.ORGANIC_MEDIA,
+      ),
+      dict(
+          testcase_name="organic_rf_test",
+          channel_name="organic_rf_ch_0",
+          expected_channel_type=constants.ORGANIC_RF,
+      ),
+  )
+  def test_hill_curves_histogram_data_correct(
+      self, channel_name, expected_channel_type
+  ):
     n_bins = 25
     hill_table = self.analyzer_non_paid.hill_curves(n_bins=n_bins)
 
-    organic_channel = "organic_media_0"
-    organic_hist_df = hill_table[
-        hill_table[constants.CHANNEL] == organic_channel
-    ].dropna(subset=[constants.COUNT_HISTOGRAM])
+    hist_df = hill_table[hill_table[constants.CHANNEL] == channel_name].dropna(
+        subset=[constants.COUNT_HISTOGRAM]
+    )
 
-    self.assertFalse(organic_hist_df.empty)
-    self.assertLen(organic_hist_df, n_bins)
+    self.assertFalse(hist_df.empty)
+    self.assertLen(hist_df, n_bins)
     self.assertEqual(
-        organic_hist_df[constants.CHANNEL_TYPE].iloc[0], constants.ORGANIC_MEDIA
+        hist_df[constants.CHANNEL_TYPE].iloc[0], expected_channel_type
     )
-    self.assertTrue((organic_hist_df[constants.COUNT_HISTOGRAM] >= 0).all())
-    self.assertTrue(
-        (organic_hist_df[constants.SCALED_COUNT_HISTOGRAM] <= 1.0001).all()
-    )
+    self.assertTrue((hist_df[constants.COUNT_HISTOGRAM] >= 0).all())
+    self.assertTrue((hist_df[constants.SCALED_COUNT_HISTOGRAM] <= 1.0001).all())
     np.testing.assert_allclose(
-        organic_hist_df[constants.START_INTERVAL_HISTOGRAM].iloc[1:].values,
-        organic_hist_df[constants.END_INTERVAL_HISTOGRAM].iloc[:-1].values,
+        hist_df[constants.START_INTERVAL_HISTOGRAM].iloc[1:].values,
+        hist_df[constants.END_INTERVAL_HISTOGRAM].iloc[:-1].values,
         atol=1e-6,
         err_msg="Histogram bin start/end edges do not align correctly.",
     )

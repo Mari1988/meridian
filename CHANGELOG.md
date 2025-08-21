@@ -23,6 +23,22 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ## [Unreleased]
 
+* Add aspline and other helper functions for AKS algorithm to core library.
+* Fix numerical stability of Adstock computation around `alpha = 1`.
+* Add `binomial` decay option to Adstock.
+* Make `trim_grids()` a public method of `OptimizationGrid` and update it to
+  remove rows of NaNs.
+* Add organic RF support for adstock decay in analyzer.
+* Add organic RF support for Hill curves in analyzer.
+* Add organic RF support for `plot_hill_curves` in visualizer.
+
+* Raise a `ValueError` if any media channel have all zeros or all `NaN`
+  impressions.
+
+## [1.1.7] - 2025-07-16
+
+* Fix `rhat_summary()` to work with a vector sigma dim.
+
 ## [1.1.6] - 2025-07-14
 
 * Convert stateful seeds into stateless seeds in `sample_posterior()` to ensure
@@ -348,4 +364,5 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 [1.1.4]: https://github.com/google/meridian/releases/tag/v1.1.4
 [1.1.5]: https://github.com/google/meridian/releases/tag/v1.1.5
 [1.1.6]: https://github.com/google/meridian/releases/tag/v1.1.6
-[Unreleased]: https://github.com/google/meridian/compare/v1.1.6...HEAD
+[1.1.7]: https://github.com/google/meridian/releases/tag/v1.1.7
+[Unreleased]: https://github.com/google/meridian/compare/v1.1.7...HEAD

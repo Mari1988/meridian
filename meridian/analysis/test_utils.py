@@ -2571,6 +2571,9 @@ ADSTOCK_DECAY_MEAN = np.array([1.0, 1.0, 0.8493, 0.8630, 0.7215])
 ORGANIC_ADSTOCK_DECAY_CI_HI = np.array([1.0, 0.9636, 0.9291, 0.8962, 0.8650])
 ORGANIC_ADSTOCK_DECAY_CI_LO = np.array([1.0, 0.6623, 0.4394, 0.2920, 0.1944])
 ORGANIC_ADSTOCK_DECAY_MEAN = np.array([1.0, 0.8076, 0.6633, 0.5537, 0.4693])
+ORGANIC_RF_ADSTOCK_DECAY_CI_HI = np.array([1.0, 0.9208, 0.8482, 0.781, 0.7202])
+ORGANIC_RF_ADSTOCK_DECAY_CI_LO = np.array([1.0, 0.6674, 0.4460, 0.2985, 0.2001])
+ORGANIC_RF_ADSTOCK_DECAY_MEAN = np.array([1.0, 0.8344, 0.7042, 0.6001, 0.5155])
 HILL_CURVES_CI_HI = np.array([0.0, 0.0, 0.00098, 0.00895, 0.00195])
 HILL_CURVES_CI_LO = np.array([0.0, 0.0, 0.00085, 0.00322, 0.00169])
 HILL_CURVES_MEAN = np.array([0.0, 0.0, 0.00091, 0.00606, 0.00183])
@@ -2640,7 +2643,6 @@ PREDICTIVE_ACCURACY_HOLDOUT_ID_GEOS_NO_TIMES = np.array([
     1.00845361,
     0.82047617,
 ])
-
 PREDICTIVE_ACCURACY_HOLDOUT_ID_TIMES_NO_GEOS = np.array([
     -1.23524213,
     -9.06220913,
@@ -2681,29 +2683,27 @@ PREDICTIVE_ACCURACY_HOLDOUT_ID_TIMES_AND_GEO = np.array([
     5.78146744,
     0.75822759,
 ])
-
 PREDICTIVE_ACCURACY_HOLDOUT_ID_NATIONAL_NO_TIMES = np.array([
-    0.42883771657943726,
-    0.4715208411216736,
-    0.45594334602355957,
-    0.8378637433052063,
-    13.80582332611084,
-    2.9550814628601074,
-    0.34947845339775085,
-    0.4262354075908661,
-    0.3586611747741699,
+    -15.619549,
+    -28.130356,
+    -17.316074,
+    16.30377,
+    10.817584,
+    15.296103,
+    2.40538,
+    2.640707,
+    2.449049,
 ])
-
 PREDICTIVE_ACCURACY_HOLDOUT_ID_NATIONAL_TIMES = np.array([
-    -0.30289185,
-    float("-inf"),
-    0.15624052,
-    0.86708003,
-    107.46259308,
-    36.39891815,
-    0.61977416,
-    107.46259308,
-    0.88497865,
+    -22.270792,
+    np.nan,
+    -22.270792,
+    161.652573,
+    np.nan,
+    161.652573,
+    4.597788,
+    np.nan,
+    4.597788,
 ])
 
 SAMPLE_IMPRESSIONS = np.array([
@@ -3142,6 +3142,7 @@ def generate_hill_curves_dataframe() -> pd.DataFrame:
       [f"ch_{i}" for i in range(3)]
       + [f"rf_ch_{i}" for i in range(2)]
       + [f"organic_ch_{i}" for i in range(2)]
+      + [f"organic_rf_ch_{i}" for i in range(1)]
   )
   channel_array = []
   channel_type_array = []
@@ -3154,6 +3155,8 @@ def generate_hill_curves_dataframe() -> pd.DataFrame:
         channel_type_array.append(c.RF)
       elif channel_name.startswith("organic_ch_"):
         channel_type_array.append(c.ORGANIC_MEDIA)
+      elif channel_name.startswith("organic_rf_ch_"):
+        channel_type_array.append(c.ORGANIC_RF)
 
   np.random.seed(0)
   media_units_array = [
