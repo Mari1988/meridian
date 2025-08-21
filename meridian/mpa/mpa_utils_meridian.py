@@ -103,20 +103,20 @@ class MeridianMPAInput:
 
     # Get the coefficient priors
     if prior_type == "spend":
-      coeff_prior = costs_array / np.max(costs_array)  # --> Spend Prior
+      coeff_prior = costs_array / np.mean(costs_array)  # --> Spend Prior
     elif prior_type == "working_spend":
       working_cost_array = (costs_array * viewability_array)/sum(costs_array * viewability_array)
       print(f"working cost array: {working_cost_array.tolist()}")
-      coeff_prior = working_cost_array / np.max(working_cost_array)
+      coeff_prior = working_cost_array / np.mean(working_cost_array)
     elif prior_type == "cpm_weighted_by_spend":
       cost_weights = costs_array/sum(costs_array)
       cpm_array_cost_weighted = cpm_array * np.array(cost_weights)
-      coeff_prior = cpm_array_cost_weighted / np.max(cpm_array_cost_weighted)
+      coeff_prior = cpm_array_cost_weighted / np.mean(cpm_array_cost_weighted)
     elif prior_type == "cpm_weighted_by_working_spend":
       working_cost_array = (costs_array * viewability_array)/sum(costs_array * viewability_array)
       print(f"working cost array: {working_cost_array.tolist()}")
       cpm_array_working_spend_weighted = cpm_array * np.array(working_cost_array)
-      coeff_prior = cpm_array_working_spend_weighted / np.max(cpm_array_working_spend_weighted)  # --> working spend scaled CPM prior
+      coeff_prior = cpm_array_working_spend_weighted / np.mean(cpm_array_working_spend_weighted)  # --> working spend scaled CPM prior
     else:
       raise ValueError("invalid prior type")
 
