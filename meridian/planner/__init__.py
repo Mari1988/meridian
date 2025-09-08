@@ -16,8 +16,10 @@
 
 from meridian.planner import adhoc_data_loader
 from meridian.planner import media_parameter_loader
+from meridian.planner import roi_to_coefficients_converter
 
 __all__ = [
     'adhoc_data_loader',
     'media_parameter_loader',
+    'roi_to_coefficients_converter',
 ]

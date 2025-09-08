@@ -69,7 +69,7 @@ def main():
 
     # control inputs
     'control_cols': ['sentiment_score_control', 'competitor_activity_score_control']
-  }
+    }
 
   try:
     print("="*60)
@@ -79,29 +79,7 @@ def main():
     # Step 1: Initialize the AdhocDataLoader
     print(f"\n1. Initializing AdhocDataLoader with file: {excel_file_path}")
     loader = adhoc_data_loader.AdhocDataLoader(excel_file_path, model_config)
-    print("   ✓ AdhocDataLoader initialized successfully")
-
-    # Step 2: Load Excel data
-    print("\n2. Loading data from Excel sheets...")
     loader.load_excel_data()
-    print("   ✓ Excel data loaded successfully")
-
-    # Display basic information about loaded data
-    if loader.data_df is not None:
-      print(f"   - Data sheet shape: {loader.data_df.shape}")
-      print(f"   - Data columns: {list(loader.data_df.columns)}")
-      print(f"   - Date range: {loader.data_df['week'].min()} to {loader.data_df['week'].max()}")
-      print(f"   - Unique geos: {loader.data_df['geo'].unique()}")
-
-    if loader.coefficients_df is not None:
-      print(f"   - Coefficients sheet shape: {loader.coefficients_df.shape}")
-    else:
-      print("   - No coefficients sheet found")
-
-    if loader.parameters_df is not None:
-      print(f"   - Parameters sheet shape: {loader.parameters_df.shape}")
-    else:
-      print("   - No parameters sheet found")
 
     # Step 3: Validate data columns
     print("\n3. Validating data columns...")
@@ -149,96 +127,6 @@ def main():
       print(f"     Columns: {list(parameters.columns)}")
     else:
       print("   - No parameters data available")
-    
-    # Step 6: Process parameters using MediaParameterLoader
-    print("\n7. Media Parameter Processing:")
-    processed_params = loader.get_processed_parameters()
-    parameter_summary = loader.get_parameter_summary()
-    
-    if processed_params is not None:
-      print("   - Processed parameter structure (lists):")
-      for key, values in processed_params.items():
-        print(f"     {key}: {values}")
-    else:
-      print("   - No processed parameters available")
-      
-    if parameter_summary is not None:
-      print("   - Parameter summary by channel:")
-      print("     " + parameter_summary.to_string(index=False).replace('\n', '\n     '))
-    else:
-      print("   - No parameter summary available")
-    
-    # Step 7: Process parameters as xarray.DataArrays
-    print("\n8. Media Parameter DataArrays:")
-    parameter_arrays = loader.get_processed_parameter_arrays()
-    
-    if parameter_arrays is not None:
-      print("   - Parameter DataArrays structure:")
-      for key, data_array in parameter_arrays.items():
-        print(f"     {key}:")
-        print(f"       Shape: {data_array.shape}")
-        print(f"       Dims: {list(data_array.dims)}")
-        print(f"       Coords: {dict(data_array.coords)}")
-        print(f"       Values: {data_array.values}")
-        print()
-    else:
-      print("   - No parameter DataArrays available")
-    
-    # Step 8: Process coefficients as xarray.DataArrays
-    print("\n9. Media Coefficients DataArrays:")
-    coefficients_arrays = loader.get_processed_coefficients_arrays()
-    
-    if coefficients_arrays is not None:
-      print("   - Coefficients DataArrays structure:")
-      for key, data_array in coefficients_arrays.items():
-        print(f"     {key}:")
-        print(f"       Shape: {data_array.shape}")
-        print(f"       Dims: {list(data_array.dims)}")
-        print(f"       Coords: {dict(data_array.coords)}")
-        print(f"       Values shape: {data_array.values.shape}")
-        print(f"       Sample values (first 3 geos, first channel):")
-        if data_array.ndim == 2:
-          print(f"         {data_array.values[:3, 0] if data_array.shape[1] > 0 else 'No channels'}")
-        print()
-    else:
-      print("   - No coefficients DataArrays available")
-    
-    # Step 9: Create ArviZ InferenceData from parameters and coefficients
-    print("\n10. ArviZ InferenceData Creation:")
-    inference_data = loader.get_inference_data()
-    
-    if inference_data is not None:
-      print("   ✓ ArviZ InferenceData created successfully")
-      print(f"   - Object type: {type(inference_data)}")
-      print(f"   - Available groups: {list(inference_data.groups())}")
-      
-      # Show posterior structure
-      posterior = inference_data.posterior
-      print(f"   - Posterior dimensions: {dict(posterior.dims)}")
-      print(f"   - Posterior coordinates: {list(posterior.coords.keys())}")
-      print(f"   - Data variables: {list(posterior.data_vars.keys())}")
-      
-      # Show sample data access
-      print("   - Sample data access:")
-      for var_name in list(posterior.data_vars.keys())[:3]:  # Show first 3 variables
-        var_data = posterior[var_name]
-        print(f"     {var_name}: shape={var_data.shape}, dims={var_data.dims}")
-        print(f"       Values: {var_data.values.flatten()[:3]}...")  # First 3 values
-      
-      # Show sample_stats group
-      if 'sample_stats' in inference_data.groups():
-        sample_stats = inference_data.sample_stats
-        print(f"   - Sample stats variables: {list(sample_stats.data_vars.keys())}")
-        
-      print("\n   Usage with ArviZ:")
-      print("     import arviz as az")
-      print("     az.summary(inference_data)  # Statistical summary")
-      print("     az.plot_trace(inference_data)  # Trace plots") 
-      print("     az.plot_posterior(inference_data)  # Posterior distributions")
-      
-    else:
-      print("   - ArviZ InferenceData not available")
-      print("     (Requires both Parameters and Coefficients sheets)")
 
     print("\n" + "="*60)
     print("SUCCESS: InputData object ready for Meridian model fitting!")

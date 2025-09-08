@@ -60,7 +60,7 @@ meridian/planner/
 ```excel
 Sheet: "Data"
 - time_col: week/date column
-- geo_col: geographic identifier  
+- geo_col: geographic identifier
 - kpi_col: target variable (conversions, revenue, etc.)
 - population_col: population by geo
 - media_cols: impression/reach columns ['Channel0_impression', ...]
@@ -69,13 +69,13 @@ Sheet: "Data"
 - frequency_cols: frequency columns (optional) ['Channel3_frequency', ...]
 - control_cols: control variables (optional)
 
-Sheet: "Coefficients" 
+Sheet: "Coefficients"
 - Geo-level coefficients for each media channel
 - Format: rows=geos, columns=channels
 
 Sheet: "Parameters"
 - MediaVariable: Channel names matching config
-- Adstock: Adstock retention rates (0-1) 
+- Adstock: Adstock retention rates (0-1)
 - Inflexion: Hill curve inflection points
 - Slope: Hill curve slopes (typically 1.0)
 ```
@@ -105,25 +105,25 @@ inference_data = loader.get_inference_data()
 model_config = {
   # Basic structure
   'time_col': 'week',
-  'geo_col': 'geo', 
+  'geo_col': 'geo',
   'population_col': 'population',
-  
+
   # KPI configuration
   'kpi_type': 'non_revenue',  # or 'revenue'
   'kpi_col': 'conversions',
   'revenue_per_kpi_col': 'revenue_per_conversion',  # if revenue KPI
-  
+
   # Media channels (impression-based)
   'media_cols': ['Channel0_impression', 'Channel1_impression', 'Channel2_impression'],
-  'media_spend_cols': ['Channel0_spend', 'Channel1_spend', 'Channel2_spend'], 
+  'media_spend_cols': ['Channel0_spend', 'Channel1_spend', 'Channel2_spend'],
   'media_channels': ['Channel0', 'Channel1', 'Channel2'],
-  
+
   # R&F channels (optional)
   'reach_cols': ['Channel3_reach'],
   'frequency_cols': ['Channel3_frequency'],
   'rf_spend_cols': ['Channel3_spend'],
   'rf_channels': ['Channel3'],
-  
+
   # Control variables (optional)
   'control_cols': ['price_index', 'competitor_spend']
 }
@@ -137,7 +137,7 @@ model_config = {
 ```python
 # Input Excel columns → Meridian constants
 'Adstock' → constants.ALPHA_M / constants.ALPHA_RF    # Retention rates
-'Inflexion' → constants.EC_M / constants.EC_RF        # Hill inflection points  
+'Inflexion' → constants.EC_M / constants.EC_RF        # Hill inflection points
 'Slope' → constants.SLOPE_M / constants.SLOPE_RF      # Hill slopes
 ```
 
@@ -179,7 +179,7 @@ summary = param_loader.get_channel_parameter_summary()
   'slope_rf': xr.DataArray([3.0], dims=['rf_channel'])
 }
 
-# Coefficient DataArrays  
+# Coefficient DataArrays
 {
   'beta_gm': xr.DataArray(shape=(20, 3), dims=['geo', 'media_channel']),
   'beta_grf': xr.DataArray(shape=(20, 1), dims=['geo', 'rf_channel'])
@@ -205,7 +205,7 @@ posterior_variables = {
   'slope_m': [1.0, 1.0, 1.0],           # Real hill slopes
   'beta_gm': array(20x3),                # Real geo coefficients
   'beta_grf': array(20x1),               # Real R&F coefficients
-  
+
   # Dummy arrays (zeros) for validation
   'mu_t': zeros(156),                    # Time trend
   'knot_values': zeros(156),             # Spline knots
@@ -241,7 +241,7 @@ posterior = point_data.posterior
 # Coordinates extracted from InputData
 dims = {
     'chain': [0],                    # Single chain
-    'draw': [0],                     # Single draw  
+    'draw': [0],                     # Single draw
     'geo': ['Geo0', 'Geo1', ...],    # From input_data.geo
     'time': [0, 1, 2, ..., 155],     # Time indices
     'media_channel': ['Channel0', 'Channel1', 'Channel2'],
@@ -262,7 +262,7 @@ from meridian.planner import AdhocDataLoader
 config = {
     'time_col': 'week', 'geo_col': 'geo', 'population_col': 'population',
     'kpi_type': 'non_revenue', 'kpi_col': 'conversions',
-    'media_cols': ['Channel0_impression', 'Channel1_impression'], 
+    'media_cols': ['Channel0_impression', 'Channel1_impression'],
     'media_spend_cols': ['Channel0_spend', 'Channel1_spend'],
     'media_channels': ['Channel0', 'Channel1']
 }
@@ -285,8 +285,8 @@ inference_data = loader.get_inference_data()
 # Create Meridian model with custom inference data
 model_spec = spec.ModelSpec()
 mmm = model.Meridian(
-    input_data=data, 
-    model_spec=model_spec, 
+    input_data=data,
+    model_spec=model_spec,
     inference_data=inference_data
 )
 
@@ -310,7 +310,7 @@ for name, array in param_arrays.items():
     print(f"{name}: {array.values} (dims: {array.dims})")
 
 # Get coefficient arrays
-coeff_arrays = loader.get_processed_coefficients_arrays()  
+coeff_arrays = loader.get_processed_coefficients_arrays()
 print(f"beta_gm shape: {coeff_arrays['beta_gm'].shape}")
 
 # Get complete inference data structure
@@ -371,7 +371,7 @@ With Excel parameters, typical optimization results show:
 - InferenceData integration
 - Error handling for missing sheets/columns
 
-# MediaParameterLoader tests (15+ tests)  
+# MediaParameterLoader tests (15+ tests)
 - Parameter mapping to Meridian constants
 - Channel reordering and validation
 - DataArray creation with proper coordinates
@@ -420,7 +420,7 @@ Solution: Update model_config column names to match Excel exactly
 
 **3. Parameter Validation**
 ```
-Error: Missing parameter arrays: {'alpha_m', 'ec_m'}  
+Error: Missing parameter arrays: {'alpha_m', 'ec_m'}
 Solution: Ensure Parameters sheet has all required channels
 ```
 
@@ -463,7 +463,7 @@ print(f"Variables: {len(inference_data.posterior.data_vars)}")
 
 ### Optimization Performance
 - **Excel Loading**: Fast pandas-based Excel reading
-- **Parameter Processing**: Efficient numpy array operations  
+- **Parameter Processing**: Efficient numpy array operations
 - **Inference Data Creation**: Minimal memory overhead with dummy arrays
 - **Budget Optimization**: Full speed with Excel parameters (~1-2 minutes)
 
@@ -474,7 +474,7 @@ print(f"Variables: {len(inference_data.posterior.data_vars)}")
 
 ### Scalability
 - **Geo Support**: Tested with 20 geos, scales to 100+
-- **Time Periods**: Tested with 156 weeks (3 years), scales to 5+ years  
+- **Time Periods**: Tested with 156 weeks (3 years), scales to 5+ years
 - **Channel Support**: Tested with 4 channels (3 media + 1 R&F), scales to 10+
 - **Excel Size**: Efficient for files up to 50MB+
 
@@ -488,12 +488,12 @@ print(f"Variables: {len(inference_data.posterior.data_vars)}")
 # Add mapping for new parameter type
 parameter_mapping = {
     'Adstock': constants.ALPHA_M,
-    'Inflexion': constants.EC_M, 
+    'Inflexion': constants.EC_M,
     'Slope': constants.SLOPE_M,
     'NewParam': constants.NEW_PARAM_M,  # Add new mapping
 }
 
-# In PointInferenceData._create_dummy_arrays()  
+# In PointInferenceData._create_dummy_arrays()
 # Add dummy array for new parameter
 dummy_arrays[constants.NEW_PARAM_M] = self._create_dummy_array(
     dims=[constants.MEDIA_CHANNEL],
@@ -510,7 +510,7 @@ class CustomDataLoader(AdhocDataLoader):
         # Custom sheet loading logic
         self.data_df = self._load_custom_data_sheet()
         self.coefficients_df = self._load_custom_coefficients_sheet()
-        
+
     def _load_custom_data_sheet(self):
         # Custom data processing
         pass
@@ -527,7 +527,7 @@ mmm_analyzer = analyzer.Analyzer(mmm)
 # Response curves using Excel parameters
 response_curves = mmm_analyzer.response_curves()
 
-# Media effects using Excel parameters  
+# Media effects using Excel parameters
 media_effects = visualizer.MediaEffects(mmm)
 plots = media_effects.response_curves_plots()
 ```
@@ -583,7 +583,7 @@ pylint meridian/planner/
 - **Custom Priors**: Using Excel parameters as prior specifications
 - **Automated Testing**: Excel file generation for testing scenarios
 
-### Integration Opportunities  
+### Integration Opportunities
 - **Response Curves**: Fast response curves using Excel parameters
 - **Contribution Analysis**: Media contribution with custom parameters
 - **Scenario Planning**: Multiple parameter sets for sensitivity analysis
@@ -603,9 +603,24 @@ The **Meridian Planner Module** successfully bridges the gap between Excel-based
 
 **Key Benefits**:
 - ✅ **Preserves Excel Parameters**: Real adstock, hill, and coefficient values maintained
-- ✅ **Full Meridian Compatibility**: Passes all validation requirements  
+- ✅ **Full Meridian Compatibility**: Passes all validation requirements
 - ✅ **Budget Optimization**: End-to-end optimization with Excel parameters
 - ✅ **Comprehensive Testing**: 45+ tests ensuring reliability
 - ✅ **Easy Integration**: Simple API for Excel to Meridian workflow
 
 This documentation provides the complete context needed for future development, maintenance, and extension of the Excel-to-Meridian integration system.
+
+## End-to-End Workflow
+
+# 1. Load Excel data
+loader = AdhocDataLoader("data.xlsx", config)
+data = loader.build_input_data()
+inference_data = loader.get_inference_data()
+
+# 2. Create Meridian model with Excel parameters
+mmm = model.Meridian(input_data=data, model_spec=spec.ModelSpec(), inference_data=inference_data)
+mmm.sample_prior(n_draws=100, seed=42)  # Required for optimization
+
+# 3. Run fast budget optimization
+optimizer = BudgetOptimizer(mmm)
+results = optimizer.optimize()  # Uses Excel parameters, not Bayesian samples
