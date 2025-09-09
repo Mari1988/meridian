@@ -6,8 +6,7 @@ from meridian.model import model
 from meridian.model import spec
 from meridian.analysis import optimizer
 
-from meridian.planner import adhoc_data_loader
-from meridian.planner.adhoc_data_loader import AdhocDataLoader
+from meridian.planner import FlexibleBudgetPlanner
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -78,9 +77,9 @@ model_config = {
   }
 
 # create data loader & point inference data
-adhoc_data_loader = AdhocDataLoader(file_name=excel_file_path, model_config=model_config)
-data = adhoc_data_loader.build_input_data()
-inference_data = adhoc_data_loader.get_inference_data()
+flexible_budget_planner = FlexibleBudgetPlanner(file_name=excel_file_path, model_config=model_config)
+data = flexible_budget_planner.build_input_data()
+inference_data = flexible_budget_planner.get_inference_data()
 
 # Test different n_draws values to test hypothesis
 print("\n" + "="*80)

@@ -16,7 +16,7 @@ Successfully bridges **Excel-based MMM estimates** with **Meridian's budget opti
 
 ```
 Excel File (3 sheets)                    Meridian Model
-├── Data Sheet           → AdhocDataLoader → InputData ──┐
+├── Data Sheet           → FlexibleBudgetPlanner → InputData ──┐
 ├── Coefficients Sheet   → MediaParameterLoader         │
 ├── Parameters Sheet     → PointInferenceData           ├→ Meridian → BudgetOptimizer
                                                         │
@@ -24,7 +24,7 @@ Excel File (3 sheets)                    Meridian Model
 ```
 
 ### Core Workflow
-1. **Excel Loading**: `AdhocDataLoader` processes 3-sheet Excel files
+1. **Excel Loading**: `FlexibleBudgetPlanner` processes 3-sheet Excel files
 2. **Parameter Processing**: `MediaParameterLoader` organizes parameters by Meridian constants
 3. **Inference Data Creation**: `PointInferenceData` creates complete ArviZ-compatible structure
 4. **Meridian Integration**: Models accept custom inference data for optimization
@@ -36,8 +36,8 @@ Excel File (3 sheets)                    Meridian Model
 ```
 meridian/planner/
 ├── __init__.py                    (22 lines)   - Module exports
-├── adhoc_data_loader.py          (411 lines)   - Main Excel loading class
-├── adhoc_data_loader_test.py     (645 lines)   - Comprehensive tests
+├── flex_budget_planner.py        (411 lines)   - Main Excel loading class
+├── flex_budget_planner_test.py   (645 lines)   - Comprehensive tests
 ├── media_parameter_loader.py     (489 lines)   - Parameter processing class
 ├── media_parameter_loader_test.py(813 lines)   - Parameter processing tests
 ├── point_inference_data.py       (405 lines)   - InferenceData creation class
@@ -52,9 +52,9 @@ meridian/planner/
 
 ## Core Classes
 
-### 1. AdhocDataLoader
+### 1. FlexibleBudgetPlanner
 
-**Purpose**: Loads Excel files and creates Meridian `InputData` objects.
+**Purpose**: Loads Excel files, creates Meridian `InputData` objects, and runs budget optimization.
 
 **Excel File Structure Requirements**:
 ```excel
@@ -83,7 +83,7 @@ Sheet: "Parameters"
 **Key Methods**:
 ```python
 # Initialize with Excel file and configuration
-loader = AdhocDataLoader(file_name="data.xlsx", model_config=config)
+loader = FlexibleBudgetPlanner(file_name="data.xlsx", model_config=config)
 
 # Load and validate Excel data
 loader.load_excel_data()
@@ -98,6 +98,9 @@ coeffs = loader.get_processed_coefficients_arrays()
 
 # Create complete ArviZ InferenceData for Meridian
 inference_data = loader.get_inference_data()
+
+# Run budget optimization directly
+optimizer_results = loader.optimize()
 ```
 
 **Configuration Example**:
@@ -256,7 +259,7 @@ dims = {
 
 ### Basic Excel to InputData
 ```python
-from meridian.planner import AdhocDataLoader
+from meridian.planner import FlexibleBudgetPlanner
 
 # Configuration
 config = {
@@ -268,17 +271,24 @@ config = {
 }
 
 # Load Excel and create InputData
-loader = AdhocDataLoader("mmm_data.xlsx", config)
+loader = FlexibleBudgetPlanner("mmm_data.xlsx", config)
 input_data = loader.build_input_data()
 ```
 
-### Excel to Budget Optimization
+### Excel to Budget Optimization (Method 1: Direct)
+```python
+# Load Excel data and run optimization directly
+loader = FlexibleBudgetPlanner("mmm_data.xlsx", config)
+results = loader.optimize()  # Handles all steps internally
+```
+
+### Excel to Budget Optimization (Method 2: Manual)
 ```python
 from meridian.model import model, spec
 from meridian.analysis import optimizer
 
 # Load Excel data and create inference data
-loader = AdhocDataLoader("mmm_data.xlsx", config)
+loader = FlexibleBudgetPlanner("mmm_data.xlsx", config)
 data = loader.build_input_data()
 inference_data = loader.get_inference_data()
 
@@ -364,7 +374,7 @@ With Excel parameters, typical optimization results show:
 
 ### Key Test Scenarios
 ```python
-# AdhocDataLoader tests (30+ tests)
+# FlexibleBudgetPlanner tests (30+ tests)
 - Excel file loading and validation
 - InputData creation with various configurations
 - Parameter and coefficient processing
@@ -442,7 +452,7 @@ Solution: Add mmm.sample_prior(n_draws=100, seed=42) before optimization
 pd.ExcelFile("file.xlsx").sheet_names
 
 # Validate data loading
-loader = AdhocDataLoader("file.xlsx", config)
+loader = FlexibleBudgetPlanner("file.xlsx", config)
 loader.load_excel_data()
 print(f"Data shape: {loader.data_df.shape}")
 print(f"Columns: {loader.data_df.columns.tolist()}")
@@ -504,8 +514,8 @@ dummy_arrays[constants.NEW_PARAM_M] = self._create_dummy_array(
 
 ### Supporting New Excel Formats
 ```python
-# Extend AdhocDataLoader for custom Excel layouts
-class CustomDataLoader(AdhocDataLoader):
+# Extend FlexibleBudgetPlanner for custom Excel layouts
+class CustomDataLoader(FlexibleBudgetPlanner):
     def load_excel_data(self):
         # Custom sheet loading logic
         self.data_df = self._load_custom_data_sheet()
@@ -613,7 +623,7 @@ This documentation provides the complete context needed for future development, 
 ## End-to-End Workflow
 
 # 1. Load Excel data
-loader = AdhocDataLoader("data.xlsx", config)
+loader = FlexibleBudgetPlanner("data.xlsx", config)
 data = loader.build_input_data()
 inference_data = loader.get_inference_data()
 

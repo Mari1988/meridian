@@ -1,18 +1,4 @@
-# Copyright 2025 The Meridian Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Tests for AdhocDataLoader."""
+"""Tests for FlexibleBudgetPlanner."""
 
 import os
 import tempfile
@@ -24,11 +10,12 @@ import numpy as np
 import xarray as xr
 import arviz as az
 
-from meridian.planner import adhoc_data_loader
+from meridian.planner import flex_budget_planner
+from meridian.planner.flex_budget_planner import FlexibleBudgetPlanner
 from meridian import constants
 
 
-class AdhocDataLoaderTest(parameterized.TestCase):
+class FlexibleBudgetPlannerTest(parameterized.TestCase):
   
   def setUp(self):
     """Set up test fixtures."""
@@ -104,7 +91,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
   def test_init_valid_config(self):
     """Test initialization with valid config."""
     file_name = 'test_file.xlsx'
-    loader = adhoc_data_loader.AdhocDataLoader(file_name, self.model_config)
+    loader = FlexibleBudgetPlanner(file_name, self.model_config)
     
     self.assertEqual(loader.file_name, file_name)
     self.assertEqual(loader.model_config, self.model_config)
@@ -118,7 +105,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     del invalid_config['kpi_col']
     
     with self.assertRaises(ValueError) as cm:
-      adhoc_data_loader.AdhocDataLoader('test.xlsx', invalid_config)
+      FlexibleBudgetPlanner('test.xlsx', invalid_config)
       
     self.assertIn('Missing required config keys', str(cm.exception))
 
@@ -128,7 +115,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     invalid_config['media_channels'] = ['Channel0', 'Channel1']  # Different length
     
     with self.assertRaises(ValueError) as cm:
-      adhoc_data_loader.AdhocDataLoader('test.xlsx', invalid_config)
+      FlexibleBudgetPlanner('test.xlsx', invalid_config)
       
     self.assertIn('media_cols and media_channels must have same length', str(cm.exception))
 
@@ -138,7 +125,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     del invalid_config['frequency_cols']  # Missing R&F key
     
     with self.assertRaises(ValueError) as cm:
-      adhoc_data_loader.AdhocDataLoader('test.xlsx', invalid_config)
+      FlexibleBudgetPlanner('test.xlsx', invalid_config)
       
     self.assertIn('all R&F keys must be provided', str(cm.exception))
 
@@ -149,7 +136,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     invalid_config['rf_channels'] = ['Channel0']
     
     with self.assertRaises(ValueError) as cm:
-      adhoc_data_loader.AdhocDataLoader('test.xlsx', invalid_config)
+      FlexibleBudgetPlanner('test.xlsx', invalid_config)
       
     self.assertIn('Channels cannot be both media and R&F channels', str(cm.exception))
     self.assertIn('Channel0', str(cm.exception))
@@ -159,7 +146,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       # Check data was loaded
@@ -183,7 +170,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     )
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       # Check only data was loaded
@@ -196,7 +183,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
 
   def test_load_excel_data_missing_file(self):
     """Test loading from non-existent Excel file."""
-    loader = adhoc_data_loader.AdhocDataLoader('nonexistent.xlsx', self.model_config)
+    loader = FlexibleBudgetPlanner('nonexistent.xlsx', self.model_config)
     
     with self.assertRaises(ValueError) as cm:
       loader.load_excel_data()
@@ -208,7 +195,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       loader.validate_data_columns()  # Should not raise
       
@@ -227,7 +214,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
       with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
         incomplete_data.to_excel(writer, sheet_name='Data', index=False)
         
-      loader = adhoc_data_loader.AdhocDataLoader(temp_file.name, self.model_config)
+      loader = FlexibleBudgetPlanner(temp_file.name, self.model_config)
       loader.load_excel_data()
       
       with self.assertRaises(ValueError) as cm:
@@ -240,7 +227,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
 
   def test_validate_data_columns_no_data_loaded(self):
     """Test validation when no data is loaded."""
-    loader = adhoc_data_loader.AdhocDataLoader('test.xlsx', self.model_config)
+    loader = FlexibleBudgetPlanner('test.xlsx', self.model_config)
     
     with self.assertRaises(ValueError) as cm:
       loader.validate_data_columns()
@@ -252,7 +239,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       input_data = loader.build_input_data()
       
       # Check that we got an InputData object
@@ -294,7 +281,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
       with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
         simple_data.to_excel(writer, sheet_name='Data', index=False)
         
-      loader = adhoc_data_loader.AdhocDataLoader(temp_file.name, config_no_rf)
+      loader = FlexibleBudgetPlanner(temp_file.name, config_no_rf)
       input_data = loader.build_input_data()
       
       # Check basic data structure
@@ -315,7 +302,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, config_no_controls)
+      loader = FlexibleBudgetPlanner(excel_file, config_no_controls)
       input_data = loader.build_input_data()
       
       # Check basic data structure 
@@ -331,7 +318,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       coefficients = loader.get_coefficients_data()
@@ -346,7 +333,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       parameters = loader.get_parameters_data()
@@ -358,7 +345,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
 
   def test_get_data_not_loaded(self):
     """Test getting data when not loaded."""
-    loader = adhoc_data_loader.AdhocDataLoader('test.xlsx', self.model_config)
+    loader = FlexibleBudgetPlanner('test.xlsx', self.model_config)
     
     self.assertIsNone(loader.get_coefficients_data())
     self.assertIsNone(loader.get_parameters_data())
@@ -368,7 +355,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       processed_params = loader.get_processed_parameters()
@@ -399,7 +386,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file(include_parameters=False)
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       processed_params = loader.get_processed_parameters()
@@ -413,7 +400,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       summary = loader.get_parameter_summary()
@@ -439,7 +426,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file(include_parameters=False)
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       summary = loader.get_parameter_summary()
@@ -453,7 +440,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       parameter_arrays = loader.get_processed_parameter_arrays()
@@ -486,7 +473,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file(include_parameters=False)
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       parameter_arrays = loader.get_processed_parameter_arrays()
@@ -500,7 +487,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       param_dict = loader.get_processed_parameters()
@@ -532,7 +519,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, config)
+      loader = FlexibleBudgetPlanner(excel_file, config)
       input_data = loader.build_input_data()
       
       self.assertIsNotNone(input_data)
@@ -546,7 +533,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       inference_data = loader.get_inference_data()
@@ -590,7 +577,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file(include_parameters=False)
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       inference_data = loader.get_inference_data()
@@ -605,7 +592,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file(include_coefficients=False)
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       inference_data = loader.get_inference_data()
@@ -620,7 +607,7 @@ class AdhocDataLoaderTest(parameterized.TestCase):
     excel_file = self._create_test_excel_file()
     
     try:
-      loader = adhoc_data_loader.AdhocDataLoader(excel_file, self.model_config)
+      loader = FlexibleBudgetPlanner(excel_file, self.model_config)
       loader.load_excel_data()
       
       inference_data = loader.get_inference_data()

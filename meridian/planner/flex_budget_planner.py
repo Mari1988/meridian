@@ -1,18 +1,4 @@
-# Copyright 2025 The Meridian Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""AdhocDataLoader for creating Meridian InputData from Excel files."""
+"""FlexibleBudgetPlanner for creating Meridian InputData from Excel files and budget optimization."""
 
 import logging
 from typing import Dict, Any, Optional
@@ -21,18 +7,21 @@ import arviz as az
 
 from meridian.data import data_frame_input_data_builder
 from meridian.data import input_data
+from meridian.model import model
+from meridian.model import spec
+from meridian.analysis import optimizer
 from meridian.planner import media_parameter_loader
 from meridian.planner import point_inference_data
 from meridian.planner import roi_to_coefficients_converter
 
 
 __all__ = [
-    'AdhocDataLoader',
+    'FlexibleBudgetPlanner',
 ]
 
 
-class AdhocDataLoader:
-  """Loads Excel file data and creates Meridian InputData objects.
+class FlexibleBudgetPlanner:
+  """Loads Excel file data, creates Meridian InputData objects, and runs budget optimization.
 
   This class handles Excel files with the expected structure:
   - 'Data' sheet: Contains MMM input data (time series data)
@@ -44,11 +33,11 @@ class AdhocDataLoader:
   or 'ROI' sheet must be present.
 
   The class uses DataFrameInputDataBuilder to create properly structured
-  Meridian InputData objects.
+  Meridian InputData objects and provides budget optimization functionality.
   """
 
   def __init__(self, file_name: str, model_config: Dict[str, Any]):
-    """Initialize the AdhocDataLoader.
+    """Initialize the FlexibleBudgetPlanner.
 
     Args:
       file_name: Path to the Excel file containing MMM data.
@@ -81,6 +70,7 @@ class AdhocDataLoader:
 
     # Validate required config keys
     self._validate_config()
+    self._validate_optimization_config()
 
   def _validate_config(self) -> None:
     """Validate that model_config contains required keys."""
@@ -116,6 +106,16 @@ class AdhocDataLoader:
       overlapping_channels = media_channels.intersection(rf_channels)
       if overlapping_channels:
         raise ValueError(f"Channels cannot be both media and R&F channels. Overlapping channels: {list(overlapping_channels)}")
+
+  def _validate_optimization_config(self) -> None:
+    """Validate model_config for optimization-specific requirements."""
+    # Validate kpi_type
+    if 'kpi_type' in self.model_config:
+      kpi_type = self.model_config['kpi_type']
+      if kpi_type not in ['revenue', 'non_revenue']:
+        raise ValueError(f"kpi_type must be either 'revenue' or 'non_revenue', got: {kpi_type}")
+
+    logging.info("Optimization config validation passed")
 
   def _detect_input_type(self) -> str:
     """Detect whether Excel file contains Coefficients or ROI sheet.
@@ -589,3 +589,61 @@ class AdhocDataLoader:
 
     except Exception as e:
       raise ValueError(f"Error creating InferenceData: {str(e)}")
+
+  def optimize(self) -> Any:
+    """Run budget optimization using Excel data with Meridian model.
+
+    Creates a Meridian model using the Excel data and runs budget optimization.
+    Handles use_kpi parameter based on model configuration validation.
+
+    Returns:
+      BudgetOptimizer results containing optimized budget allocation.
+
+    Raises:
+      ValueError: If optimization fails or data is incomplete.
+    """
+    try:
+      # Build input data and inference data
+      logging.info("Building input data and inference data for optimization...")
+      data = self.build_input_data()
+      point_inference_data = self.get_inference_data()
+
+      if point_inference_data is None:
+        raise ValueError("Cannot create inference data - missing parameters or coefficients sheets")
+
+      # Create Meridian model
+      logging.info("Creating Meridian model...")
+      model_spec = spec.ModelSpec()
+      model_obj = model.Meridian(
+          input_data=data,
+          model_spec=model_spec,
+          inference_data=point_inference_data
+      )
+
+      # Sample prior (required for optimization)
+      logging.info("Sampling prior distributions...")
+      model_obj.sample_prior(n_draws=100, seed=42)
+
+      # Create optimizer
+      logging.info("Creating budget optimizer...")
+      budget_optimizer = optimizer.BudgetOptimizer(model_obj)
+
+      # Check if we need to use use_kpi parameter
+      optimize_kwargs = {}
+      kpi_type = self.model_config.get('kpi_type')
+      revenue_per_kpi_col = self.model_config.get('revenue_per_kpi_col')
+      
+      if (kpi_type == 'non_revenue' and 
+          ('revenue_per_kpi_col' not in self.model_config or revenue_per_kpi_col is None)):
+        optimize_kwargs['use_kpi'] = True
+        logging.info("Using use_kpi=True due to non_revenue KPI type without revenue_per_kpi_col")
+
+      # Run optimization
+      logging.info("Running budget optimization...")
+      optimizer_results = budget_optimizer.optimize(**optimize_kwargs)
+
+      logging.info("Budget optimization completed successfully")
+      return optimizer_results
+
+    except Exception as e:
+      raise ValueError(f"Error during optimization: {str(e)}")
