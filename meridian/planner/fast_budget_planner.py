@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import numpy as np
 
 from meridian.model import model
 from meridian.model import spec
@@ -48,7 +49,7 @@ else:
 # step 2: -------------------------------------------- Excel-based point-estimates MMM model ------------------------------- #
 excel_file_path = (
   '/Users/mariappan.subramanian/Library/CloudStorage/'
-  'OneDrive-TheTradeDesk/MMM/BudgetOptimizer/mmm_input_artifacts.xlsx'
+  'OneDrive-TheTradeDesk/MMM/BudgetOptimizer/optimizer_input_case_coeff.xlsx'
 )
 
 # Model configuration based on actual Excel file structure

@@ -29,7 +29,7 @@ class FlexibleBudgetPlanner:
   - 'Parameters' sheet: Contains media parameters (adstock, hill parameters)
 
   ROI sheets are automatically detected and converted to equivalent coefficients
-  using Meridian's media transformation functions. Exactly one of 'Coefficients' 
+  using Meridian's media transformation functions. Exactly one of 'Coefficients'
   or 'ROI' sheet must be present.
 
   The class uses DataFrameInputDataBuilder to create properly structured
@@ -119,30 +119,30 @@ class FlexibleBudgetPlanner:
 
   def _detect_input_type(self) -> str:
     """Detect whether Excel file contains Coefficients or ROI sheet.
-    
+
     Returns:
       String indicating input type: 'coefficients' or 'roi'.
-      
+
     Raises:
       ValueError: If neither sheet exists, both exist, or Excel file cannot be read.
     """
     try:
       excel_file = pd.ExcelFile(self.file_name)
       available_sheets = excel_file.sheet_names
-      
+
       has_coefficients = 'Coefficients' in available_sheets
       has_roi = 'ROI' in available_sheets
-      
+
       if has_coefficients and has_roi:
         raise ValueError("Excel file cannot contain both 'Coefficients' and 'ROI' sheets. Please provide exactly one.")
-      
+
       if has_coefficients:
         return 'coefficients'
       elif has_roi:
         return 'roi'
       else:
         raise ValueError("Excel file must contain either 'Coefficients' or 'ROI' sheet.")
-        
+
     except Exception as e:
       if "cannot contain both" in str(e) or "must contain either" in str(e):
         raise  # Re-raise our validation errors
@@ -150,31 +150,31 @@ class FlexibleBudgetPlanner:
 
   def _validate_sheet_requirements(self, input_type: str) -> None:
     """Validate that required sheets exist for the detected input type.
-    
+
     Args:
       input_type: Type of input detected ('coefficients' or 'roi').
-      
+
     Raises:
       ValueError: If required sheets are missing.
     """
     try:
       excel_file = pd.ExcelFile(self.file_name)
       available_sheets = excel_file.sheet_names
-      
+
       # Data sheet is always required
       if 'Data' not in available_sheets:
         raise ValueError("Excel file must contain 'Data' sheet")
-      
+
       # Parameters sheet is required for ROI conversion
       if input_type == 'roi' and 'Parameters' not in available_sheets:
         raise ValueError("ROI input requires 'Parameters' sheet for conversion")
-        
+
       # Validate the appropriate coefficient/ROI sheet exists
       if input_type == 'coefficients' and 'Coefficients' not in available_sheets:
         raise ValueError("Coefficients input type detected but 'Coefficients' sheet not found")
       elif input_type == 'roi' and 'ROI' not in available_sheets:
         raise ValueError("ROI input type detected but 'ROI' sheet not found")
-        
+
     except Exception as e:
       if "Excel file must contain" in str(e) or "input type detected" in str(e) or "ROI input requires" in str(e):
         raise  # Re-raise our validation errors
@@ -182,14 +182,14 @@ class FlexibleBudgetPlanner:
 
   def _convert_roi_to_coefficients(self) -> pd.DataFrame:
     """Convert ROI data to equivalent coefficients using ROIToCoefficientsConverter.
-    
+
     This method creates an InputData object first, then uses the converter to
     transform ROI values into coefficient values that can be used with the
     existing MediaParameterLoader workflow.
-    
+
     Returns:
       DataFrame with coefficient values in same format as original ROI data.
-      
+
     Raises:
       ValueError: If ROI conversion fails.
     """
@@ -203,7 +203,7 @@ class FlexibleBudgetPlanner:
           default_population_column=self.model_config['population_col'],
           default_kpi_column=self.model_config['kpi_col']
       )
-      
+
       # Add basic data required for ROI conversion
       builder = builder.with_kpi(
           self.data_df,
@@ -211,14 +211,14 @@ class FlexibleBudgetPlanner:
           time_col=self.model_config['time_col'],
           geo_col=self.model_config['geo_col']
       )
-      
+
       # Add population data
       builder = builder.with_population(
           self.data_df,
           population_col=self.model_config['population_col'],
           geo_col=self.model_config['geo_col']
       )
-      
+
       # Add revenue per KPI if available
       if 'revenue_per_kpi_col' in self.model_config:
         builder = builder.with_revenue_per_kpi(
@@ -227,7 +227,7 @@ class FlexibleBudgetPlanner:
             time_col=self.model_config['time_col'],
             geo_col=self.model_config['geo_col']
         )
-      
+
       # Add media data
       builder = builder.with_media(
           self.data_df,
@@ -237,7 +237,7 @@ class FlexibleBudgetPlanner:
           time_col=self.model_config['time_col'],
           geo_col=self.model_config['geo_col']
       )
-      
+
       # Add RF data if present
       if 'rf_channels' in self.model_config and self.model_config['rf_channels']:
         builder = builder.with_reach(
@@ -249,9 +249,9 @@ class FlexibleBudgetPlanner:
             time_col=self.model_config['time_col'],
             geo_col=self.model_config['geo_col']
         )
-      
+
       input_data_obj = builder.build()
-      
+
       # Create converter and perform conversion
       converter = roi_to_coefficients_converter.ROIToCoefficientsConverter(
           roi_df=self.roi_df,
@@ -259,12 +259,12 @@ class FlexibleBudgetPlanner:
           input_data_obj=input_data_obj,
           model_config=self.model_config
       )
-      
+
       converted_coefficients = converter.convert_roi_to_coefficients()
       logging.info(f"Successfully converted ROI to coefficients for {len(converted_coefficients)} geos")
-      
+
       return converted_coefficients
-      
+
     except Exception as e:
       raise ValueError(f"Error converting ROI to coefficients: {str(e)}")
 
@@ -274,13 +274,13 @@ class FlexibleBudgetPlanner:
       # Step 1: Detect input type (ROI vs Coefficients)
       self.input_type = self._detect_input_type()
       logging.info(f"Detected input type: {self.input_type}")
-      
+
       # Step 2: Validate sheet requirements for detected type
       self._validate_sheet_requirements(self.input_type)
-      
+
       # Step 3: Set is_roi_input flag in model config
       self.model_config['is_roi_input'] = (self.input_type == 'roi')
-      
+
       # Step 4: Load Data sheet (always required)
       self.data_df = pd.read_excel(self.file_name, sheet_name='Data')
       logging.info(f"Loaded Data sheet with shape: {self.data_df.shape}")
@@ -299,11 +299,11 @@ class FlexibleBudgetPlanner:
         self.coefficients_df = pd.read_excel(self.file_name, sheet_name='Coefficients')
         logging.info(f"Loaded Coefficients sheet with shape: {self.coefficients_df.shape}")
         self.roi_df = None
-        
+
       elif self.input_type == 'roi':
         self.roi_df = pd.read_excel(self.file_name, sheet_name='ROI')
         logging.info(f"Loaded ROI sheet with shape: {self.roi_df.shape}")
-        
+
         # Convert ROI to coefficients using the converter
         logging.info("Converting ROI data to equivalent coefficients...")
         self.coefficients_df = self._convert_roi_to_coefficients()
@@ -329,7 +329,7 @@ class FlexibleBudgetPlanner:
     required_cols.extend(self.model_config['media_spend_cols'])
 
     # Add revenue per KPI if specified
-    if 'revenue_per_kpi_col' in self.model_config:
+    if 'revenue_per_kpi_col' in self.model_config and self.model_config['revenue_per_kpi_col'] is not None:
       required_cols.append(self.model_config['revenue_per_kpi_col'])
 
     # Add R&F columns if specified
@@ -377,7 +377,7 @@ class FlexibleBudgetPlanner:
     )
 
     # Add revenue per KPI if specified
-    if 'revenue_per_kpi_col' in self.model_config:
+    if 'revenue_per_kpi_col' in self.model_config and self.model_config['revenue_per_kpi_col'] is not None:
       builder = builder.with_revenue_per_kpi(
         self.data_df,
         revenue_per_kpi_col=self.model_config['revenue_per_kpi_col'],
@@ -632,8 +632,8 @@ class FlexibleBudgetPlanner:
       optimize_kwargs = {}
       kpi_type = self.model_config.get('kpi_type')
       revenue_per_kpi_col = self.model_config.get('revenue_per_kpi_col')
-      
-      if (kpi_type == 'non_revenue' and 
+
+      if (kpi_type == 'non_revenue' and
           ('revenue_per_kpi_col' not in self.model_config or revenue_per_kpi_col is None)):
         optimize_kwargs['use_kpi'] = True
         logging.info("Using use_kpi=True due to non_revenue KPI type without revenue_per_kpi_col")
