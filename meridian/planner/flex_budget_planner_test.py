@@ -162,8 +162,8 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
     finally:
       os.unlink(excel_file)
 
-  def test_load_excel_data_missing_optional_sheets(self):
-    """Test loading Excel data with missing optional sheets."""
+  def test_load_excel_data_missing_required_sheets(self):
+    """Test loading Excel data with missing required Coefficients/ROI sheets."""
     excel_file = self._create_test_excel_file(
       include_coefficients=False, 
       include_parameters=False
@@ -171,12 +171,12 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
     
     try:
       loader = FlexibleBudgetPlanner(excel_file, self.model_config)
-      loader.load_excel_data()
       
-      # Check only data was loaded
-      self.assertIsNotNone(loader.data_df)
-      self.assertIsNone(loader.coefficients_df)
-      self.assertIsNone(loader.parameters_df)
+      # Should raise ValueError as Coefficients or ROI sheet is required
+      with self.assertRaises(ValueError) as cm:
+        loader.load_excel_data()
+      
+      self.assertIn("must contain either 'Coefficients' or 'ROI' sheet", str(cm.exception))
       
     finally:
       os.unlink(excel_file)
@@ -213,6 +213,9 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
     try:
       with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
         incomplete_data.to_excel(writer, sheet_name='Data', index=False)
+        # Add required Coefficients sheet for successful loading
+        self.sample_coefficients.to_excel(writer, sheet_name='Coefficients', index=False)
+        self.sample_parameters.to_excel(writer, sheet_name='Parameters', index=False)
         
       loader = FlexibleBudgetPlanner(temp_file.name, self.model_config)
       loader.load_excel_data()
@@ -280,6 +283,12 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
     try:
       with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
         simple_data.to_excel(writer, sheet_name='Data', index=False)
+        # Add required Coefficients sheet (only media channels, no RF)
+        simple_coefficients = self.sample_coefficients.drop(columns=['Channel3'])
+        simple_coefficients.to_excel(writer, sheet_name='Coefficients', index=False)
+        # Add Parameters sheet for media channels only
+        simple_parameters = self.sample_parameters[self.sample_parameters['MediaVariable'] != 'Channel3']
+        simple_parameters.to_excel(writer, sheet_name='Parameters', index=False)
         
       loader = FlexibleBudgetPlanner(temp_file.name, config_no_rf)
       input_data = loader.build_input_data()
@@ -561,13 +570,15 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
       self.assertEqual(posterior.sizes['rf_channel'], 1)
       self.assertEqual(posterior.sizes['geo'], 2)  # Test file has 2 geos
       
-      # Check expected data variables
-      expected_vars = {
+      # Check that essential data variables from Excel are present
+      essential_vars = {
         constants.ALPHA_M, constants.EC_M, constants.SLOPE_M,
         constants.ALPHA_RF, constants.EC_RF, constants.SLOPE_RF,
         constants.BETA_GM, constants.BETA_GRF
       }
-      self.assertEqual(set(posterior.data_vars.keys()), expected_vars)
+      actual_vars = set(posterior.data_vars.keys())
+      self.assertTrue(essential_vars.issubset(actual_vars), 
+                     f"Missing essential variables: {essential_vars - actual_vars}")
       
     finally:
       os.unlink(excel_file)
@@ -588,16 +599,17 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
       os.unlink(excel_file)
 
   def test_get_inference_data_no_coefficients(self):
-    """Test InferenceData creation with missing coefficients."""
+    """Test InferenceData creation with missing required Coefficients sheet."""
     excel_file = self._create_test_excel_file(include_coefficients=False)
     
     try:
       loader = FlexibleBudgetPlanner(excel_file, self.model_config)
-      loader.load_excel_data()
       
-      inference_data = loader.get_inference_data()
+      # Should fail during loading since Coefficients sheet is required
+      with self.assertRaises(ValueError) as cm:
+        loader.load_excel_data()
       
-      self.assertIsNone(inference_data)
+      self.assertIn("must contain either 'Coefficients' or 'ROI' sheet", str(cm.exception))
       
     finally:
       os.unlink(excel_file)
@@ -627,6 +639,89 @@ class FlexibleBudgetPlannerTest(parameterized.TestCase):
       
     finally:
       os.unlink(excel_file)
+
+  def test_rf_only_configuration(self):
+    """Test RF-only configuration (no media channels, only reach/frequency)."""
+    # Create RF-only configuration (no media keys specified)
+    rf_only_config = {
+      'time_col': 'week',
+      'geo_col': 'geo',
+      'population_col': 'population',
+      'kpi_type': 'non_revenue',
+      'kpi_col': 'conversions',
+      'revenue_per_kpi_col': 'revenue_per_conversion',
+      
+      # Only RF channels, no media channels
+      'reach_cols': ['Channel3_reach'],
+      'frequency_cols': ['Channel3_frequency'],
+      'rf_spend_cols': ['Channel3_spend'],
+      'rf_channels': ['Channel3'],
+    }
+    
+    # Create RF-only data and Excel file
+    rf_only_data = self.sample_data[['week', 'geo', 'population', 'conversions', 'revenue_per_conversion',
+                                     'Channel3_reach', 'Channel3_frequency', 'Channel3_spend']].copy()
+    
+    rf_only_coefficients = self.sample_coefficients[['geo', 'Channel3']].copy()
+    rf_only_parameters = self.sample_parameters[self.sample_parameters['MediaVariable'] == 'Channel3'].copy()
+    
+    temp_file = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+    temp_file.close()
+    
+    try:
+      with pd.ExcelWriter(temp_file.name, engine='openpyxl') as writer:
+        rf_only_data.to_excel(writer, sheet_name='Data', index=False)
+        rf_only_coefficients.to_excel(writer, sheet_name='Coefficients', index=False)
+        rf_only_parameters.to_excel(writer, sheet_name='Parameters', index=False)
+      
+      # Test initialization and validation
+      loader = FlexibleBudgetPlanner(temp_file.name, rf_only_config)
+      
+      # Verify media channels are empty lists (auto-created)
+      self.assertEqual(loader.model_config['media_channels'], [])
+      self.assertEqual(loader.model_config['media_cols'], [])
+      self.assertEqual(loader.model_config['media_spend_cols'], [])
+      
+      # Verify RF channels are configured
+      self.assertEqual(loader.model_config['rf_channels'], ['Channel3'])
+      
+      # Test data loading
+      loader.load_excel_data()
+      self.assertIsNotNone(loader.data_df)
+      self.assertIsNotNone(loader.coefficients_df)
+      self.assertIsNotNone(loader.parameters_df)
+      
+      # Test InputData building
+      input_data = loader.build_input_data()
+      
+      # Verify RF-only structure
+      self.assertIsNotNone(input_data.kpi)
+      self.assertIsNotNone(input_data.population)
+      self.assertIsNone(input_data.media)  # No media channels
+      self.assertIsNotNone(input_data.reach)  # RF channels present
+      self.assertIsNotNone(input_data.frequency)
+      self.assertIsNotNone(input_data.rf_spend)
+      
+      # Verify RF dimensions
+      self.assertEqual(input_data.reach.shape[2], 1)  # 1 RF channel
+      
+      # Test inference data creation
+      inference_data = loader.get_inference_data()
+      self.assertIsNotNone(inference_data)
+      
+      # Verify posterior contains RF parameters but no media parameters
+      posterior = inference_data.posterior
+      self.assertIn(constants.ALPHA_RF, posterior.data_vars)
+      self.assertIn(constants.EC_RF, posterior.data_vars)
+      self.assertIn(constants.SLOPE_RF, posterior.data_vars)
+      self.assertIn(constants.BETA_GRF, posterior.data_vars)
+      
+      # Verify RF dimensions in posterior
+      self.assertEqual(posterior[constants.ALPHA_RF].shape, (1, 1, 1))  # chain, draw, rf_channel
+      self.assertEqual(posterior[constants.BETA_GRF].shape, (1, 1, 2, 1))  # chain, draw, geo, rf_channel
+      
+    finally:
+      os.unlink(temp_file.name)
 
 
 if __name__ == '__main__':

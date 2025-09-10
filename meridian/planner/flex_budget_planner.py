@@ -34,9 +34,15 @@ class FlexibleBudgetPlanner:
 
   The class uses DataFrameInputDataBuilder to create properly structured
   Meridian InputData objects and provides budget optimization functionality.
+  
+  Geo Filtering:
+  By default (auto_filter_geos=True), the system automatically filters the Data 
+  sheet to only include geos that have corresponding entries in the Coefficients 
+  or ROI sheet. This allows working with partial geo coverage. Set 
+  auto_filter_geos=False to enforce strict geo matching validation instead.
   """
 
-  def __init__(self, file_name: str, model_config: Dict[str, Any]):
+  def __init__(self, file_name: str, model_config: Dict[str, Any], auto_filter_geos: bool = True):
     """Initialize the FlexibleBudgetPlanner.
 
     Args:
@@ -57,9 +63,13 @@ class FlexibleBudgetPlanner:
         - rf_channels: List of R&F channel names (optional)
         - control_cols: List of control variable columns (optional)
         - is_roi_input: Boolean indicating ROI input (auto-detected, do not set manually)
+      auto_filter_geos: Whether to automatically filter Data sheet to geos present 
+        in Coefficients/ROI sheet. If True (default), Data will be filtered to 
+        intersection of geos. If False, strict geo matching validation is enforced.
     """
     self.file_name = file_name
     self.model_config = model_config
+    self.auto_filter_geos = auto_filter_geos
 
     # Data containers
     self.data_df: Optional[pd.DataFrame] = None
@@ -68,27 +78,41 @@ class FlexibleBudgetPlanner:
     self.roi_df: Optional[pd.DataFrame] = None
     self.input_type: Optional[str] = None
 
+    # Optimization intermediate outputs
+    self.input_data: Optional[input_data.InputData] = None
+    self.inference_data: Optional[Any] = None  # az.InferenceData
+    self.model_obj: Optional[Any] = None  # model.Meridian
+
     # Validate required config keys
     self._validate_config()
     self._validate_optimization_config()
 
   def _validate_config(self) -> None:
     """Validate that model_config contains required keys."""
+    # Core required keys (always needed)
     required_keys = [
-      'time_col', 'geo_col', 'population_col', 'kpi_type',
-      'kpi_col', 'media_cols', 'media_spend_cols', 'media_channels'
+      'time_col', 'geo_col', 'population_col', 'kpi_type', 'kpi_col'
     ]
 
     missing_keys = [key for key in required_keys if key not in self.model_config]
     if missing_keys:
       raise ValueError(f"Missing required config keys: {missing_keys}")
 
-    # Validate list lengths match
-    if len(self.model_config['media_cols']) != len(self.model_config['media_channels']):
-      raise ValueError("media_cols and media_channels must have same length")
+    # Set default empty lists for media keys if not provided (enables RF-only configurations)
+    if 'media_cols' not in self.model_config:
+      self.model_config['media_cols'] = []
+    if 'media_spend_cols' not in self.model_config:
+      self.model_config['media_spend_cols'] = []
+    if 'media_channels' not in self.model_config:
+      self.model_config['media_channels'] = []
 
-    if len(self.model_config['media_spend_cols']) != len(self.model_config['media_channels']):
-      raise ValueError("media_spend_cols and media_channels must have same length")
+    # Validate media list lengths match (only if media channels exist)
+    if self.model_config.get('media_channels'):
+      if len(self.model_config['media_cols']) != len(self.model_config['media_channels']):
+        raise ValueError("media_cols and media_channels must have same length")
+
+      if len(self.model_config['media_spend_cols']) != len(self.model_config['media_channels']):
+        raise ValueError("media_spend_cols and media_channels must have same length")
 
     # Validate R&F channels if provided
     if any(key in self.model_config for key in ['reach_cols', 'frequency_cols', 'rf_spend_cols', 'rf_channels']):
@@ -100,12 +124,20 @@ class FlexibleBudgetPlanner:
       if not all(len(self.model_config[key]) == len(self.model_config['rf_channels']) for key in rf_keys[:-1]):
         raise ValueError("All R&F column lists must have same length as rf_channels")
 
-      # Validate that media_channels and rf_channels don't overlap
-      media_channels = set(self.model_config['media_channels'])
-      rf_channels = set(self.model_config['rf_channels'])
-      overlapping_channels = media_channels.intersection(rf_channels)
-      if overlapping_channels:
-        raise ValueError(f"Channels cannot be both media and R&F channels. Overlapping channels: {list(overlapping_channels)}")
+      # Validate that media_channels and rf_channels don't overlap (only if both exist)
+      if self.model_config.get('media_channels') and self.model_config.get('rf_channels', []):
+        media_channels = set(self.model_config['media_channels'])
+        rf_channels = set(self.model_config['rf_channels'])
+        overlapping_channels = media_channels.intersection(rf_channels)
+        if overlapping_channels:
+          raise ValueError(f"Channels cannot be both media and R&F channels. Overlapping channels: {list(overlapping_channels)}")
+
+    # Ensure at least one channel type is provided
+    has_media_channels = bool(self.model_config.get('media_channels'))
+    has_rf_channels = bool(self.model_config.get('rf_channels', []))
+    
+    if not has_media_channels and not has_rf_channels:
+      raise ValueError("At least one of media_channels or rf_channels must be provided")
 
   def _validate_optimization_config(self) -> None:
     """Validate model_config for optimization-specific requirements."""
@@ -268,6 +300,81 @@ class FlexibleBudgetPlanner:
     except Exception as e:
       raise ValueError(f"Error converting ROI to coefficients: {str(e)}")
 
+  def _filter_data_by_available_geos(self) -> None:
+    """Filter Data sheet to only include geos present in Coefficients/ROI sheet.
+    
+    This method filters self.data_df to only include geos that have corresponding
+    entries in the coefficients_df or roi_df. This allows the system to work
+    with partial geo coverage in the coefficients/ROI sheets.
+    
+    The filtering is performed in-place on self.data_df.
+    """
+    if not self.auto_filter_geos:
+      return  # Skip filtering if disabled
+      
+    if self.data_df is None:
+      raise ValueError("Data DataFrame not loaded. Cannot perform geo filtering.")
+    
+    # Determine which coefficient/ROI DataFrame to use for filtering
+    filter_df = None
+    filter_sheet_name = ""
+    
+    if self.input_type == 'coefficients' and self.coefficients_df is not None:
+      filter_df = self.coefficients_df
+      filter_sheet_name = "Coefficients"
+    elif self.input_type == 'roi' and self.roi_df is not None:
+      filter_df = self.roi_df
+      filter_sheet_name = "ROI"
+    else:
+      logging.warning("No Coefficients or ROI data available for geo filtering. Skipping filtering.")
+      return
+    
+    # Get geo column name
+    geo_col = self.model_config.get('geo_col', 'geo')
+    
+    if geo_col not in self.data_df.columns:
+      raise ValueError(f"Geo column '{geo_col}' not found in Data sheet")
+    
+    if 'geo' not in filter_df.columns:
+      raise ValueError(f"'geo' column not found in {filter_sheet_name} sheet")
+    
+    # Get available geos from both sheets
+    data_geos = set(self.data_df[geo_col].unique())
+    available_geos = set(filter_df['geo'].unique())
+    
+    # Calculate intersection and differences
+    common_geos = data_geos.intersection(available_geos)
+    missing_from_coeffs = data_geos - available_geos
+    extra_in_coeffs = available_geos - data_geos
+    
+    # Log filtering information
+    original_geo_count = len(data_geos)
+    filtered_geo_count = len(common_geos)
+    
+    logging.info(f"Geo filtering summary:")
+    logging.info(f"  - Original geos in Data sheet: {original_geo_count}")
+    logging.info(f"  - Available geos in {filter_sheet_name} sheet: {len(available_geos)}")
+    logging.info(f"  - Common geos (intersection): {filtered_geo_count}")
+    
+    if missing_from_coeffs:
+      logging.info(f"  - Geos in Data but not in {filter_sheet_name}: {sorted(list(missing_from_coeffs))}")
+    
+    if extra_in_coeffs:
+      logging.info(f"  - Geos in {filter_sheet_name} but not in Data: {sorted(list(extra_in_coeffs))}")
+    
+    if not common_geos:
+      raise ValueError(f"No common geos found between Data sheet and {filter_sheet_name} sheet. "
+                       f"Cannot proceed with empty geo intersection.")
+    
+    # Filter data_df to only include common geos
+    original_rows = len(self.data_df)
+    self.data_df = self.data_df[self.data_df[geo_col].isin(common_geos)].copy()
+    filtered_rows = len(self.data_df)
+    
+    logging.info(f"  - Data rows before filtering: {original_rows}")
+    logging.info(f"  - Data rows after filtering: {filtered_rows}")
+    logging.info(f"Geo filtering completed. Data sheet filtered to {filtered_geo_count} geos.")
+
   def load_excel_data(self) -> None:
     """Load data from all sheets in the Excel file with ROI/Coefficients detection."""
     try:
@@ -309,6 +416,9 @@ class FlexibleBudgetPlanner:
         self.coefficients_df = self._convert_roi_to_coefficients()
         logging.info(f"ROI conversion completed. Generated coefficients with shape: {self.coefficients_df.shape}")
 
+      # Step 7: Apply geo filtering if enabled
+      self._filter_data_by_available_geos()
+
     except Exception as e:
       raise ValueError(f"Error loading Excel file {self.file_name}: {str(e)}")
 
@@ -324,9 +434,10 @@ class FlexibleBudgetPlanner:
       self.model_config['kpi_col'],
     ]
 
-    # Add media columns
-    required_cols.extend(self.model_config['media_cols'])
-    required_cols.extend(self.model_config['media_spend_cols'])
+    # Add media columns (only if media channels are configured)
+    if self.model_config.get('media_channels'):
+      required_cols.extend(self.model_config['media_cols'])
+      required_cols.extend(self.model_config['media_spend_cols'])
 
     # Add revenue per KPI if specified
     if 'revenue_per_kpi_col' in self.model_config and self.model_config['revenue_per_kpi_col'] is not None:
@@ -401,15 +512,16 @@ class FlexibleBudgetPlanner:
         geo_col=self.model_config['geo_col']
       )
 
-    # Add media channels
-    builder = builder.with_media(
-      self.data_df,
-      media_cols=self.model_config['media_cols'],
-      media_spend_cols=self.model_config['media_spend_cols'],
-      media_channels=self.model_config['media_channels'],
-      time_col=self.model_config['time_col'],
-      geo_col=self.model_config['geo_col']
-    )
+    # Add media channels (only if media channels are configured)
+    if self.model_config.get('media_channels'):
+      builder = builder.with_media(
+        self.data_df,
+        media_cols=self.model_config['media_cols'],
+        media_spend_cols=self.model_config['media_spend_cols'],
+        media_channels=self.model_config['media_channels'],
+        time_col=self.model_config['time_col'],
+        geo_col=self.model_config['geo_col']
+      )
 
     # Add R&F channels if specified
     if 'reach_cols' in self.model_config:
@@ -463,7 +575,8 @@ class FlexibleBudgetPlanner:
         self.parameters_df,
         self.model_config,
         coefficients_df=self.coefficients_df,
-        data_df=self.data_df
+        data_df=self.data_df,
+        auto_filter_geos=self.auto_filter_geos
       )
       processed_params = param_loader.get_parameter_dict()
       logging.info("Successfully processed media parameters")
@@ -487,7 +600,8 @@ class FlexibleBudgetPlanner:
         self.parameters_df,
         self.model_config,
         coefficients_df=self.coefficients_df,
-        data_df=self.data_df
+        data_df=self.data_df,
+        auto_filter_geos=self.auto_filter_geos
       )
       return param_loader.get_channel_parameter_summary()
 
@@ -512,7 +626,8 @@ class FlexibleBudgetPlanner:
         self.parameters_df,
         self.model_config,
         coefficients_df=self.coefficients_df,
-        data_df=self.data_df
+        data_df=self.data_df,
+        auto_filter_geos=self.auto_filter_geos
       )
       processed_arrays = param_loader.get_parameter_data_arrays()
       logging.info("Successfully processed media parameters as DataArrays")
@@ -539,7 +654,8 @@ class FlexibleBudgetPlanner:
         self.parameters_df,
         self.model_config,
         coefficients_df=self.coefficients_df,
-        data_df=self.data_df
+        data_df=self.data_df,
+        auto_filter_geos=self.auto_filter_geos
       )
       processed_coeffs = param_loader.get_coefficients_data_arrays()
       logging.info("Successfully processed media coefficients as DataArrays")
@@ -590,11 +706,25 @@ class FlexibleBudgetPlanner:
     except Exception as e:
       raise ValueError(f"Error creating InferenceData: {str(e)}")
 
-  def optimize(self) -> Any:
+  def optimize(self, optimizer_kwargs: dict | None = None) -> Any:
     """Run budget optimization using Excel data with Meridian model.
 
     Creates a Meridian model using the Excel data and runs budget optimization.
     Handles use_kpi parameter based on model configuration validation.
+
+    Args:
+      optimizer_kwargs: Optional dictionary of keyword arguments to pass to
+        BudgetOptimizer.optimize(). User-provided parameters take precedence
+        over auto-detected ones. Key supported parameters include:
+        - fixed_budget (bool): Whether to use fixed budget optimization
+        - budget (float): Budget amount for optimization
+        - start_date/end_date: Time range for optimization
+        - pct_of_spend (Sequence[float]): Percentage allocation per channel
+        - spend_constraint_lower/upper: Spend constraint bounds
+        - target_roi/target_mroi (float): Target ROI/marginal ROI values
+        - use_kpi (bool): Whether to optimize for KPI vs revenue
+        - confidence_level (float): Confidence level for optimization
+        - And other BudgetOptimizer.optimize() parameters
 
     Returns:
       BudgetOptimizer results containing optimized budget allocation.
@@ -611,6 +741,10 @@ class FlexibleBudgetPlanner:
       if point_inference_data is None:
         raise ValueError("Cannot create inference data - missing parameters or coefficients sheets")
 
+      # Store intermediate outputs
+      self.input_data = data
+      self.inference_data = point_inference_data
+
       # Create Meridian model
       logging.info("Creating Meridian model...")
       model_spec = spec.ModelSpec()
@@ -620,6 +754,9 @@ class FlexibleBudgetPlanner:
           inference_data=point_inference_data
       )
 
+      # Store model object
+      self.model_obj = model_obj
+
       # Sample prior (required for optimization)
       logging.info("Sampling prior distributions...")
       model_obj.sample_prior(n_draws=100, seed=42)
@@ -628,19 +765,25 @@ class FlexibleBudgetPlanner:
       logging.info("Creating budget optimizer...")
       budget_optimizer = optimizer.BudgetOptimizer(model_obj)
 
-      # Check if we need to use use_kpi parameter
-      optimize_kwargs = {}
+      # Check if we need to use use_kpi parameter (auto-detected)
+      auto_kwargs = {}
       kpi_type = self.model_config.get('kpi_type')
       revenue_per_kpi_col = self.model_config.get('revenue_per_kpi_col')
 
       if (kpi_type == 'non_revenue' and
           ('revenue_per_kpi_col' not in self.model_config or revenue_per_kpi_col is None)):
-        optimize_kwargs['use_kpi'] = True
+        auto_kwargs['use_kpi'] = True
         logging.info("Using use_kpi=True due to non_revenue KPI type without revenue_per_kpi_col")
+
+      # Merge user-provided kwargs with auto-detected ones (user kwargs take precedence)
+      final_kwargs = auto_kwargs.copy()
+      if optimizer_kwargs:
+        final_kwargs.update(optimizer_kwargs)
+        logging.info(f"Using user-provided optimizer kwargs: {optimizer_kwargs}")
 
       # Run optimization
       logging.info("Running budget optimization...")
-      optimizer_results = budget_optimizer.optimize(**optimize_kwargs)
+      optimizer_results = budget_optimizer.optimize(**final_kwargs)
 
       logging.info("Budget optimization completed successfully")
       return optimizer_results

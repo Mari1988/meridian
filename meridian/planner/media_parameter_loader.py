@@ -24,7 +24,8 @@ class MediaParameterLoader:
 
   def __init__(self, parameters_df: pd.DataFrame, model_config: Dict[str, Any], 
                coefficients_df: Optional[pd.DataFrame] = None, 
-               data_df: Optional[pd.DataFrame] = None):
+               data_df: Optional[pd.DataFrame] = None,
+               auto_filter_geos: bool = True):
     """Initialize the MediaParameterLoader.
 
     Args:
@@ -36,11 +37,14 @@ class MediaParameterLoader:
       coefficients_df: Optional DataFrame containing coefficients from Excel Coefficients sheet.
         Expected columns: 'geo' + media_channels + rf_channels
       data_df: Optional DataFrame containing data from Excel Data sheet (for geo validation).
+      auto_filter_geos: Whether to skip strict geo validation. If True (default), 
+        assumes data has already been filtered. If False, enforces strict geo matching.
     """
     self.parameters_df = parameters_df.copy()
     self.coefficients_df = coefficients_df.copy() if coefficients_df is not None else None
     self.data_df = data_df
     self.model_config = model_config
+    self.auto_filter_geos = auto_filter_geos
 
     # Validate inputs
     self._validate_inputs()
@@ -363,8 +367,8 @@ class MediaParameterLoader:
       raise ValueError(f"Unexpected columns in Coefficients sheet: {list(extra_columns)}. "
                        f"Expected columns: {required_columns}")
 
-    # Validate geo values if data_df is available
-    if self.data_df is not None:
+    # Validate geo values if data_df is available and strict validation is enabled
+    if self.data_df is not None and not self.auto_filter_geos:
       geo_col = self.model_config.get('geo_col', 'geo')
       if geo_col in self.data_df.columns:
         data_geos = set(self.data_df[geo_col].unique())
@@ -378,6 +382,8 @@ class MediaParameterLoader:
         if extra_geos:
           raise ValueError(f"Unexpected geo values in Coefficients sheet: {list(extra_geos)}. "
                            f"Should match geo values from Data sheet")
+    elif self.auto_filter_geos:
+      logging.info("Geo validation skipped - auto_filter_geos is enabled, assuming data already filtered")
 
     # Check for duplicate geo entries
     if self.coefficients_df['geo'].duplicated().any():

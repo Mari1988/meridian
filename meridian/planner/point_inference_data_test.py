@@ -128,7 +128,7 @@ class PointInferenceDataTest(parameterized.TestCase):
     with self.assertRaises(ValueError) as cm:
       point_inference_data.PointInferenceData(incomplete_params, self.coefficient_arrays)
       
-    self.assertIn('Missing parameter arrays', str(cm.exception))
+    self.assertIn('Missing media parameter arrays', str(cm.exception))
     
   def test_init_missing_coefficient_keys(self):
     """Test initialization with missing required coefficient keys.""" 

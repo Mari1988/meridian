@@ -678,7 +678,8 @@ class MediaParameterLoaderTest(parameterized.TestCase):
       self.sample_parameters, 
       self.model_config,
       coefficients_df=invalid_coefficients,
-      data_df=self.sample_data
+      data_df=self.sample_data,
+      auto_filter_geos=False  # Ensure strict validation for this test
     )
     
     with self.assertRaises(ValueError) as cm:

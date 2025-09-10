@@ -68,23 +68,41 @@ class PointInferenceData:
     if not self.coefficient_arrays:
       raise ValueError("coefficient_arrays cannot be empty")
       
-    # Check for required parameter keys
-    expected_param_keys = {constants.ALPHA_M, constants.EC_M, constants.SLOPE_M}
-    if constants.ALPHA_RF in self.parameter_arrays:
-      expected_param_keys.update({constants.ALPHA_RF, constants.EC_RF, constants.SLOPE_RF})
+    # Check for required parameter keys (flexible for media-only, RF-only, or mixed)
+    has_media_params = any(key in self.parameter_arrays for key in [constants.ALPHA_M, constants.EC_M, constants.SLOPE_M])
+    has_rf_params = any(key in self.parameter_arrays for key in [constants.ALPHA_RF, constants.EC_RF, constants.SLOPE_RF])
+    
+    # Must have at least one type of parameters (media or RF)
+    if not has_media_params and not has_rf_params:
+      raise ValueError("Must have either media parameters (ALPHA_M, EC_M, SLOPE_M) or RF parameters (ALPHA_RF, EC_RF, SLOPE_RF)")
+    
+    # If media parameters are present, all media parameters must be present
+    if has_media_params:
+      expected_media_params = {constants.ALPHA_M, constants.EC_M, constants.SLOPE_M}
+      missing_media_params = expected_media_params - set(self.parameter_arrays.keys())
+      if missing_media_params:
+        raise ValueError(f"Missing media parameter arrays: {missing_media_params}")
+    
+    # If RF parameters are present, all RF parameters must be present
+    if has_rf_params:
+      expected_rf_params = {constants.ALPHA_RF, constants.EC_RF, constants.SLOPE_RF}
+      missing_rf_params = expected_rf_params - set(self.parameter_arrays.keys())
+      if missing_rf_params:
+        raise ValueError(f"Missing RF parameter arrays: {missing_rf_params}")
       
-    missing_params = expected_param_keys - set(self.parameter_arrays.keys())
-    if missing_params:
-      raise ValueError(f"Missing parameter arrays: {missing_params}")
-      
-    # Check for required coefficient keys
-    expected_coeff_keys = {constants.BETA_GM}
-    if constants.BETA_GRF in self.coefficient_arrays:
-      expected_coeff_keys.add(constants.BETA_GRF)
-      
-    missing_coeffs = expected_coeff_keys - set(self.coefficient_arrays.keys())
-    if missing_coeffs:
-      raise ValueError(f"Missing coefficient arrays: {missing_coeffs}")
+    # Check for required coefficient keys (flexible for media-only, RF-only, or mixed)
+    has_media_coeffs = constants.BETA_GM in self.coefficient_arrays
+    has_rf_coeffs = constants.BETA_GRF in self.coefficient_arrays
+    
+    # Must have at least one type of coefficients
+    if not has_media_coeffs and not has_rf_coeffs:
+      raise ValueError("Must have either media coefficients (BETA_GM) or RF coefficients (BETA_GRF)")
+    
+    # Validate parameter-coefficient consistency
+    if has_media_params and not has_media_coeffs:
+      raise ValueError("Media parameters provided but missing media coefficients (BETA_GM)")
+    if has_rf_params and not has_rf_coeffs:
+      raise ValueError("RF parameters provided but missing RF coefficients (BETA_GRF)")
       
     logging.info("Input validation passed for PointInferenceData creation")
   
