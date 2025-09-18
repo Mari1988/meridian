@@ -9,9 +9,13 @@ Meridian is Google's open-source Marketing Mix Modeling (MMM) framework built on
 ## Development Commands
 
 ### Testing
-- Run all tests: `pytest -vv -n auto`
-- Run specific test file: `pytest path/to/test_file.py -v`
-- Run tests for specific module: `pytest meridian/model/ -v`
+- Run all tests: `python -m pytest -vv -n auto` (if pytest is installed)
+- Run specific test file: `python -m module.path.test_file` (direct module execution)
+- Run tests for planner module:
+  - `python -m meridian.planner.flex_budget_planner_test`
+  - `python -m meridian.planner.media_parameter_loader_test`
+  - `python -m meridian.planner.point_inference_data_test`
+  - `python -m meridian.planner.roi_to_coefficients_converter_test`
 
 ### Code Quality
 - Lint code: `pylint meridian/`
@@ -77,7 +81,8 @@ Meridian is Google's open-source Marketing Mix Modeling (MMM) framework built on
 
 - **Python Version**: Requires Python 3.10+ (tested on 3.10, 3.11, 3.12)
 - **Code Style**: Google Python style guide with 2-space indentation
-- **Testing**: Uses pytest with parallel execution (-n auto)
+- **Testing**: Uses direct module execution for tests (e.g., `python -m meridian.planner.test_file`)
 - **Formatting**: pyink (Google's Python formatter) is the standard
 - **GPU Support**: Recommended for production use, especially for large datasets
 - **Data Format**: Primarily uses xarray.DataArray for multi-dimensional data
+- always use the venv in the project folder

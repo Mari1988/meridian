@@ -181,3 +181,40 @@ or \
 6. Calculate the ratio between numerator_gx / denominator_gx to get the beta_gx
 
 Think hard and let me know the implementation plan. Do you see any problems with this approach?
+
+
+## Add method to call optimizer
+1. Let us rename the class 'AdhocDataLoader' to 'FlexibleBudgetPlanner'
+2. After renaming, let's add a method named 'optimize' to call the optimizer something like below.
+
+```
+planner = FlexibleBudgetPlanner(file_name=excel_file_path, model_config=model_config)
+data = planner.build_input_data()
+point_inference_data = planner.get_inference_data()
+
+model_obj = model.Meridian(input_data=data, model_spec=spec.ModelSpec(), inference_data=point_inference_data)
+model_obj.sample_prior(n_draws=100, seed=42)
+optimizer = optimizer.BudgetOptimizer(model_obj)
+optimizer_results = optimizer.optimize()
+
+return optimizer_results
+```
+3. Also, we would need to add the following validations on the model_config
+    i) kpi_type should either be non_revenue or revenue. if not raise exception
+    ii) if kpi_type non_revenue and revenue_per_kpi is not given then pass use_kpi=True to optimizer.optimize() method
+4. Test the changes
+5. Finally, update the claudeMD in planner directory
+
+## Create excel input file from Meridian's model file.
+
+Input: /Users/mariappan.subramanian/Documents/repo/forked/meridian/demo/saved_models/demo_model_geo_all_channels_new.pkl
+Output: Excel file that can be fed into FlexibleBudgetPlanner. The output format should be same as the sample file here:/Users/mariappan.subramanian/Library/CloudStorage/OneDrive-TheTradeDesk/MMM/BudgetOptimizer/optimizer_input_case_coeff.xlsx
+
+Instructions:
+1. First, load the model file using 'model.load_mmm' method
+2. Create the 'Data' sheet based on the information in input_data attribute in the model
+3. Create 'Coefficients' sheet based on the median of the inference_data.posterior's beta_gm, beta_grf dataarrays
+4. Create 'Parameters' sheet based on the median of the inference_data.posterior's ('alpha_m', 'ec_m', 'slope_m', 'alpha_rf', 'ec_rf', 'slope_rf')
+5. Just create a single python file with a minimum number of lines of code. No need to do any test or validation at this point.
+
+Think very hard.

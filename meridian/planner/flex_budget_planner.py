@@ -34,11 +34,11 @@ class FlexibleBudgetPlanner:
 
   The class uses DataFrameInputDataBuilder to create properly structured
   Meridian InputData objects and provides budget optimization functionality.
-  
+
   Geo Filtering:
-  By default (auto_filter_geos=True), the system automatically filters the Data 
-  sheet to only include geos that have corresponding entries in the Coefficients 
-  or ROI sheet. This allows working with partial geo coverage. Set 
+  By default (auto_filter_geos=True), the system automatically filters the Data
+  sheet to only include geos that have corresponding entries in the Coefficients
+  or ROI sheet. This allows working with partial geo coverage. Set
   auto_filter_geos=False to enforce strict geo matching validation instead.
   """
 
@@ -63,8 +63,8 @@ class FlexibleBudgetPlanner:
         - rf_channels: List of R&F channel names (optional)
         - control_cols: List of control variable columns (optional)
         - is_roi_input: Boolean indicating ROI input (auto-detected, do not set manually)
-      auto_filter_geos: Whether to automatically filter Data sheet to geos present 
-        in Coefficients/ROI sheet. If True (default), Data will be filtered to 
+      auto_filter_geos: Whether to automatically filter Data sheet to geos present
+        in Coefficients/ROI sheet. If True (default), Data will be filtered to
         intersection of geos. If False, strict geo matching validation is enforced.
     """
     self.file_name = file_name
@@ -135,7 +135,7 @@ class FlexibleBudgetPlanner:
     # Ensure at least one channel type is provided
     has_media_channels = bool(self.model_config.get('media_channels'))
     has_rf_channels = bool(self.model_config.get('rf_channels', []))
-    
+
     if not has_media_channels and not has_rf_channels:
       raise ValueError("At least one of media_channels or rf_channels must be provided")
 
@@ -302,23 +302,23 @@ class FlexibleBudgetPlanner:
 
   def _filter_data_by_available_geos(self) -> None:
     """Filter Data sheet to only include geos present in Coefficients/ROI sheet.
-    
+
     This method filters self.data_df to only include geos that have corresponding
     entries in the coefficients_df or roi_df. This allows the system to work
     with partial geo coverage in the coefficients/ROI sheets.
-    
+
     The filtering is performed in-place on self.data_df.
     """
     if not self.auto_filter_geos:
       return  # Skip filtering if disabled
-      
+
     if self.data_df is None:
       raise ValueError("Data DataFrame not loaded. Cannot perform geo filtering.")
-    
+
     # Determine which coefficient/ROI DataFrame to use for filtering
     filter_df = None
     filter_sheet_name = ""
-    
+
     if self.input_type == 'coefficients' and self.coefficients_df is not None:
       filter_df = self.coefficients_df
       filter_sheet_name = "Coefficients"
@@ -328,49 +328,49 @@ class FlexibleBudgetPlanner:
     else:
       logging.warning("No Coefficients or ROI data available for geo filtering. Skipping filtering.")
       return
-    
+
     # Get geo column name
     geo_col = self.model_config.get('geo_col', 'geo')
-    
+
     if geo_col not in self.data_df.columns:
       raise ValueError(f"Geo column '{geo_col}' not found in Data sheet")
-    
+
     if 'geo' not in filter_df.columns:
       raise ValueError(f"'geo' column not found in {filter_sheet_name} sheet")
-    
+
     # Get available geos from both sheets
     data_geos = set(self.data_df[geo_col].unique())
     available_geos = set(filter_df['geo'].unique())
-    
+
     # Calculate intersection and differences
     common_geos = data_geos.intersection(available_geos)
     missing_from_coeffs = data_geos - available_geos
     extra_in_coeffs = available_geos - data_geos
-    
+
     # Log filtering information
     original_geo_count = len(data_geos)
     filtered_geo_count = len(common_geos)
-    
+
     logging.info(f"Geo filtering summary:")
     logging.info(f"  - Original geos in Data sheet: {original_geo_count}")
     logging.info(f"  - Available geos in {filter_sheet_name} sheet: {len(available_geos)}")
     logging.info(f"  - Common geos (intersection): {filtered_geo_count}")
-    
+
     if missing_from_coeffs:
       logging.info(f"  - Geos in Data but not in {filter_sheet_name}: {sorted(list(missing_from_coeffs))}")
-    
+
     if extra_in_coeffs:
       logging.info(f"  - Geos in {filter_sheet_name} but not in Data: {sorted(list(extra_in_coeffs))}")
-    
+
     if not common_geos:
       raise ValueError(f"No common geos found between Data sheet and {filter_sheet_name} sheet. "
                        f"Cannot proceed with empty geo intersection.")
-    
+
     # Filter data_df to only include common geos
     original_rows = len(self.data_df)
     self.data_df = self.data_df[self.data_df[geo_col].isin(common_geos)].copy()
     filtered_rows = len(self.data_df)
-    
+
     logging.info(f"  - Data rows before filtering: {original_rows}")
     logging.info(f"  - Data rows after filtering: {filtered_rows}")
     logging.info(f"Geo filtering completed. Data sheet filtered to {filtered_geo_count} geos.")
@@ -692,12 +692,13 @@ class FlexibleBudgetPlanner:
       if self.data_df is None:
         self.load_excel_data()
 
-      input_data_obj = self.build_input_data()
+      if self.input_data is None:
+        self.input_data = self.build_input_data()
 
       # Create PointInferenceData with input_data for complete structure
       point_data = point_inference_data.PointInferenceData(
         parameter_arrays, coefficient_arrays,
-        input_data_obj=input_data_obj
+        input_data_obj=self.input_data
       )
       inference_data = point_data.get_inference_data()
       logging.info("Successfully created ArviZ InferenceData from Excel data")
@@ -705,6 +706,18 @@ class FlexibleBudgetPlanner:
 
     except Exception as e:
       raise ValueError(f"Error creating InferenceData: {str(e)}")
+
+  def _format_optimizer_kwargs(self, optimizer_kwargs: dict) -> dict:
+    """Format optimizer kwargs."""
+    keys_to_build = ['spend_constraint_lower', 'spend_constraint_upper', 'pct_of_spend']
+    paid_channels_argument_builder = self.input_data.get_paid_channels_argument_builder()
+
+    for key in keys_to_build:
+      if key in optimizer_kwargs and isinstance(optimizer_kwargs[key], dict):
+        optimizer_kwargs[key] = paid_channels_argument_builder(**optimizer_kwargs[key])
+
+    return optimizer_kwargs
+
 
   def optimize(self, optimizer_kwargs: dict | None = None) -> Any:
     """Run budget optimization using Excel data with Meridian model.
@@ -735,21 +748,20 @@ class FlexibleBudgetPlanner:
     try:
       # Build input data and inference data
       logging.info("Building input data and inference data for optimization...")
-      data = self.build_input_data()
+      self.input_data = self.build_input_data()
       point_inference_data = self.get_inference_data()
 
       if point_inference_data is None:
         raise ValueError("Cannot create inference data - missing parameters or coefficients sheets")
 
       # Store intermediate outputs
-      self.input_data = data
       self.inference_data = point_inference_data
 
       # Create Meridian model
       logging.info("Creating Meridian model...")
-      model_spec = spec.ModelSpec()
+      model_spec = spec.ModelSpec(knots=1)
       model_obj = model.Meridian(
-          input_data=data,
+          input_data=self.input_data,
           model_spec=model_spec,
           inference_data=point_inference_data
       )
@@ -780,6 +792,8 @@ class FlexibleBudgetPlanner:
       if optimizer_kwargs:
         final_kwargs.update(optimizer_kwargs)
         logging.info(f"Using user-provided optimizer kwargs: {optimizer_kwargs}")
+
+      final_kwargs = self._format_optimizer_kwargs(final_kwargs)
 
       # Run optimization
       logging.info("Running budget optimization...")

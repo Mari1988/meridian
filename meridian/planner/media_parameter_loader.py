@@ -22,8 +22,8 @@ class MediaParameterLoader:
   the data structure and ensures proper alignment with model configuration.
   """
 
-  def __init__(self, parameters_df: pd.DataFrame, model_config: Dict[str, Any], 
-               coefficients_df: Optional[pd.DataFrame] = None, 
+  def __init__(self, parameters_df: pd.DataFrame, model_config: Dict[str, Any],
+               coefficients_df: Optional[pd.DataFrame] = None,
                data_df: Optional[pd.DataFrame] = None,
                auto_filter_geos: bool = True):
     """Initialize the MediaParameterLoader.
@@ -37,7 +37,7 @@ class MediaParameterLoader:
       coefficients_df: Optional DataFrame containing coefficients from Excel Coefficients sheet.
         Expected columns: 'geo' + media_channels + rf_channels
       data_df: Optional DataFrame containing data from Excel Data sheet (for geo validation).
-      auto_filter_geos: Whether to skip strict geo validation. If True (default), 
+      auto_filter_geos: Whether to skip strict geo validation. If True (default),
         assumes data has already been filtered. If False, enforces strict geo matching.
     """
     self.parameters_df = parameters_df.copy()
@@ -285,10 +285,10 @@ class MediaParameterLoader:
       })
 
     return pd.DataFrame(summary_data)
-  
+
   def get_parameter_data_arrays(self) -> Dict[str, xr.DataArray]:
     """Process parameters and return organized xarray.DataArray objects.
-    
+
     Returns:
       Dictionary with parameter DataArrays organized by Meridian constants:
       - ALPHA_M, EC_M, SLOPE_M: DataArrays with media_channel coordinates
@@ -296,9 +296,9 @@ class MediaParameterLoader:
     """
     # Get processed parameter lists first
     param_dict = self.get_parameter_dict()
-    
+
     result = {}
-    
+
     # Create DataArrays for media channel parameters
     if self.media_channels:
       result[constants.ALPHA_M] = xr.DataArray(
@@ -307,22 +307,22 @@ class MediaParameterLoader:
         coords={'media_channel': self.media_channels},
         name=constants.ALPHA_M
       )
-      
+
       result[constants.EC_M] = xr.DataArray(
         data=param_dict[constants.EC_M],
         dims=['media_channel'],
         coords={'media_channel': self.media_channels},
         name=constants.EC_M
       )
-      
+
       result[constants.SLOPE_M] = xr.DataArray(
         data=param_dict[constants.SLOPE_M],
         dims=['media_channel'],
         coords={'media_channel': self.media_channels},
         name=constants.SLOPE_M
       )
-      
-    # Create DataArrays for R&F channel parameters  
+
+    # Create DataArrays for R&F channel parameters
     if self.rf_channels:
       result[constants.ALPHA_RF] = xr.DataArray(
         data=param_dict[constants.ALPHA_RF],
@@ -330,21 +330,21 @@ class MediaParameterLoader:
         coords={'rf_channel': self.rf_channels},
         name=constants.ALPHA_RF
       )
-      
+
       result[constants.EC_RF] = xr.DataArray(
         data=param_dict[constants.EC_RF],
         dims=['rf_channel'],
         coords={'rf_channel': self.rf_channels},
         name=constants.EC_RF
       )
-      
+
       result[constants.SLOPE_RF] = xr.DataArray(
         data=param_dict[constants.SLOPE_RF],
         dims=['rf_channel'],
         coords={'rf_channel': self.rf_channels},
         name=constants.SLOPE_RF
       )
-    
+
     logging.info(f"Successfully created DataArrays for {len(result)} parameter types")
     return result
 
@@ -373,11 +373,11 @@ class MediaParameterLoader:
       if geo_col in self.data_df.columns:
         data_geos = set(self.data_df[geo_col].unique())
         coeff_geos = set(self.coefficients_df['geo'].unique())
-        
+
         missing_geos = data_geos - coeff_geos
         if missing_geos:
           raise ValueError(f"Missing geo values in Coefficients sheet: {list(missing_geos)}")
-          
+
         extra_geos = coeff_geos - data_geos
         if extra_geos:
           raise ValueError(f"Unexpected geo values in Coefficients sheet: {list(extra_geos)}. "
@@ -393,16 +393,16 @@ class MediaParameterLoader:
     # Validate coefficient values (numeric and non-negative)
     for channel in self.all_channels:
       channel_values = self.coefficients_df[channel]
-      
+
       # Check for non-numeric values
       if not pd.api.types.is_numeric_dtype(channel_values):
         raise ValueError(f"Column '{channel}' in Coefficients sheet must contain numeric values")
-      
+
       # Check for NaN values
       if channel_values.isna().any():
         invalid_geos = self.coefficients_df[channel_values.isna()]['geo'].tolist()
         raise ValueError(f"Column '{channel}' contains missing values for geos: {invalid_geos}")
-      
+
       # Check for negative values
       if (channel_values < 0).any():
         invalid_geos = self.coefficients_df[channel_values < 0]['geo'].tolist()
@@ -413,7 +413,7 @@ class MediaParameterLoader:
 
   def get_coefficients_data_arrays(self) -> Dict[str, xr.DataArray]:
     """Process coefficients and return organized xarray.DataArray objects.
-    
+
     Returns:
       Dictionary with coefficients DataArrays organized by Meridian constants:
       - BETA_GM: DataArray with (geo, media_channel) coordinates for media channels
@@ -421,7 +421,7 @@ class MediaParameterLoader:
     """
     if self.coefficients_df is None:
       raise ValueError("coefficients_df is None. Cannot process coefficients.")
-      
+
     if self.processed_coefficients is not None:
       return self.processed_coefficients
 
@@ -431,7 +431,10 @@ class MediaParameterLoader:
     # Sort coefficients by geo to ensure consistent ordering
     sorted_coeffs_df = self.coefficients_df.sort_values('geo').reset_index(drop=True)
     geo_list = sorted_coeffs_df['geo'].tolist()
-    
+
+    if len(geo_list) == 1: # for national model
+      geo_list[0] = constants.NATIONAL_MODEL_DEFAULT_GEO_NAME
+
     result = {}
 
     # Create DataArray for media channel coefficients
@@ -440,10 +443,10 @@ class MediaParameterLoader:
       for channel in self.media_channels:
         channel_values = sorted_coeffs_df[channel].values
         media_coeff_data.append(channel_values)
-      
+
       # Transpose to get (geo, media_channel) shape
       media_coeff_array = np.array(media_coeff_data).T
-      
+
       result[constants.BETA_GM] = xr.DataArray(
         data=media_coeff_array,
         dims=['geo', 'media_channel'],
@@ -460,10 +463,10 @@ class MediaParameterLoader:
       for channel in self.rf_channels:
         channel_values = sorted_coeffs_df[channel].values
         rf_coeff_data.append(channel_values)
-      
+
       # Transpose to get (geo, rf_channel) shape
       rf_coeff_array = np.array(rf_coeff_data).T
-      
+
       result[constants.BETA_GRF] = xr.DataArray(
         data=rf_coeff_array,
         dims=['geo', 'rf_channel'],
