@@ -253,7 +253,7 @@ class OptimizationGrid:
       scenario = dataclasses.replace(
           scenario, total_budget=np.sum(rounded_spend)
       )
-    optimal_spend = self._grid_search(
+    optimal_spend = self._grid_search_iterative(
         spend_grid=spend_grid,
         incremental_outcome_grid=incremental_outcome_grid,
         scenario=scenario,
@@ -418,6 +418,7 @@ class OptimizationGrid:
           roi_grid_point=roi_grid_point,
           scenario=scenario,
       ):
+        print('Optimization constraints exceeded')
         break
 
       iterative_roi_grid[0 : row_idx + 1, media_idx] = np.nan
@@ -431,6 +432,69 @@ class OptimizationGrid:
           decimals=8,
       )
     return spend_optimal
+
+  def _grid_search_iterative(
+      self,
+      spend_grid: xr.DataArray,
+      incremental_outcome_grid: xr.DataArray,
+      scenario: FixedBudgetScenario | FlexibleBudgetScenario,
+  ) -> np.ndarray:
+    """Row-by-row iterative optimization for better handling of S-shaped response curves.
+
+    Improved grid search algorithm that works better with S-shaped curves (slope > 1)
+    by iterating through spend levels and selecting highest ROI channel at each step.
+
+    Args:
+      spend_grid: Discrete grid with dimensions (`grid_length` x
+        `n_total_channels`) containing spend by channel for all media and RF
+        channels, used in the hill-climbing search algorithm.
+      incremental_outcome_grid: Discrete grid with dimensions (`grid_length` x
+        `n_total_channels`) containing incremental outcome by channel for all
+        media and RF channels, used in the hill-climbing search algorithm.
+      scenario: The optimization scenario with corresponding parameters.
+
+    Returns:
+      `np.ndarray` of dimension (`n_total_channels`) containing the optimal
+      media spend that maximizes incremental outcome based on spend constraints
+      for all media and RF channels.
+    """
+    # Convert xr.DataArray to numpy arrays for processing
+    spend_grid_np = spend_grid.values
+    outcome_grid_np = incremental_outcome_grid.values
+
+    # Step 1: Initialize with first row (minimum spend levels)
+    spend = spend_grid_np[0, :].copy()
+    incremental_outcome = outcome_grid_np[0, :].copy()
+
+    # Step 2: Iterate from 2nd row onwards
+    for i in range(1, spend_grid_np.shape[0]):
+      # Step 3: Calculate marginal ROI for each channel at this spend level
+      spend_delta = spend_grid_np[i, :] - spend
+      outcome_delta = outcome_grid_np[i, :] - incremental_outcome
+
+      # Handle divide by zero and calculate ROI
+      roi = np.round(tf.math.divide_no_nan(outcome_delta, spend_delta), 8)
+      if np.isnan(roi).all():
+        break
+
+      # max roi channel's index
+      max_roi_idx = np.nanargmax(roi)
+      max_roi_value = roi[max_roi_idx]
+
+      # Step 5: Update spend and outcome for max ROI channel
+      spend[max_roi_idx] = spend_grid_np[i, max_roi_idx]
+      incremental_outcome[max_roi_idx] = outcome_grid_np[i, max_roi_idx]
+
+      # Step 6-7: Check optimization constraints and break if met
+      if _exceeds_optimization_constraints(
+          spend=spend,
+          incremental_outcome=incremental_outcome,
+          roi_grid_point=max_roi_value,
+          scenario=scenario,
+      ):
+        break
+
+    return spend.astype(int)
 
 
 @dataclasses.dataclass(frozen=True)

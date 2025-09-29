@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any, Optional
 import pandas as pd
 import arviz as az
+import numpy as np
 
 from meridian.data import data_frame_input_data_builder
 from meridian.data import input_data
@@ -13,7 +14,7 @@ from meridian.analysis import optimizer
 from meridian.planner import media_parameter_loader
 from meridian.planner import point_inference_data
 from meridian.planner import roi_to_coefficients_converter
-
+from meridian.analysis.optimizer import OptimizationResults
 
 __all__ = [
     'FlexibleBudgetPlanner',
@@ -804,3 +805,76 @@ class FlexibleBudgetPlanner:
 
     except Exception as e:
       raise ValueError(f"Error during optimization: {str(e)}")
+
+
+
+class CompareOptimizedVsNonOptimized:
+  def __init__(self, opt_results: OptimizationResults) -> None:
+    self.optimized_data = opt_results.optimized_data.sel(metric='mean')
+    self.nonoptimized_data = opt_results.nonoptimized_data.sel(metric='mean')
+
+  @property
+  def opt_df(self):
+    return self.optimized_data.to_dataframe().reset_index()
+
+  @property
+  def nonopt_df(self):
+    return self.nonoptimized_data.to_dataframe().reset_index()
+
+  @property
+  def opt_attrs(self):
+    return self.optimized_data.attrs
+
+  @property
+  def nonopt_attrs(self):
+    return self.nonoptimized_data.attrs
+
+  def get_total_level_comparison(self) -> pd.DataFrame:
+    """ Overall summary of optimized vs non-optimized results """
+    total_opt_df = pd.DataFrame([self.opt_attrs]). \
+      rename(columns={
+        'budget': 'optimized_budget',
+        'total_incremental_outcome': 'optimized_total_incremental_outcome',
+          'total_cpik': 'optimized_total_cpa'}
+          )[['start_date', 'end_date', 'optimized_budget', 'optimized_total_incremental_outcome', 'optimized_total_cpa']]
+
+    total_nonopt_df = pd.DataFrame([self.nonopt_attrs]). \
+      rename(columns={
+        'budget': 'nonoptimized_budget',
+        'total_incremental_outcome': 'nonoptimized_total_incremental_outcome',
+          'total_cpik': 'nonoptimized_total_cpa'}
+          )[['nonoptimized_budget', 'nonoptimized_total_incremental_outcome', 'nonoptimized_total_cpa']]
+
+    total_opt_vs_nonopt_df = total_opt_df.join(total_nonopt_df)
+    total_opt_vs_nonopt_df['budget_change'] = total_opt_vs_nonopt_df['optimized_budget'] / total_opt_vs_nonopt_df['nonoptimized_budget'] - 1.0
+    total_opt_vs_nonopt_df['outcome_change'] = total_opt_vs_nonopt_df['optimized_total_incremental_outcome'] / total_opt_vs_nonopt_df['nonoptimized_total_incremental_outcome'] - 1.0
+    total_opt_vs_nonopt_df['cpa_change'] = total_opt_vs_nonopt_df['optimized_total_cpa'] / total_opt_vs_nonopt_df['nonoptimized_total_cpa'] - 1.0
+
+    return total_opt_vs_nonopt_df
+
+  def get_channel_level_comparison(self) -> pd.DataFrame:
+    """ Channel level summary - Optimized vs Non-Optimized """
+    opt_df_formatted = self.opt_df.rename(
+      columns={
+      'spend': 'optimized_spend',
+      'incremental_outcome': 'optimized_incremental_outcome',
+      'effectiveness': 'optimized_effectiveness',
+      'cpik': 'optimized_cpa',
+      })[['channel', 'optimized_spend', 'optimized_incremental_outcome', 'optimized_effectiveness', 'optimized_cpa']].copy()
+
+
+    nonopt_df_formatted = self.nonopt_df.rename(
+      columns={
+      'spend': 'nonoptimized_spend',
+      'incremental_outcome': 'nonoptimized_incremental_outcome',
+      'effectiveness': 'nonoptimized_effectiveness',
+      'cpik': 'nonoptimized_cpa',
+      })[['channel', 'nonoptimized_spend', 'nonoptimized_incremental_outcome', 'nonoptimized_effectiveness', 'nonoptimized_cpa']].copy()
+
+    channel_opt_vs_nonopt_df = opt_df_formatted.merge(nonopt_df_formatted, on='channel', how='left')
+    channel_opt_vs_nonopt_df['budget_change'] = channel_opt_vs_nonopt_df['optimized_spend'] / channel_opt_vs_nonopt_df['nonoptimized_spend'] - 1.0
+    channel_opt_vs_nonopt_df['outcome_change'] = channel_opt_vs_nonopt_df['optimized_incremental_outcome'] / channel_opt_vs_nonopt_df['nonoptimized_incremental_outcome'] - 1.0
+    channel_opt_vs_nonopt_df['effectiveness_change'] = channel_opt_vs_nonopt_df['optimized_effectiveness'] / channel_opt_vs_nonopt_df['nonoptimized_effectiveness'] - 1.0
+    channel_opt_vs_nonopt_df['cpa_change'] = channel_opt_vs_nonopt_df['optimized_cpa'] / channel_opt_vs_nonopt_df['nonoptimized_cpa'] - 1.0
+
+    return channel_opt_vs_nonopt_df
