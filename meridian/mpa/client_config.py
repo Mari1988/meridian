@@ -138,9 +138,9 @@ ec50_multiplier_config = {'ALDI_US_Starcom': {'Display': 3.71, 'TV': 0.71, 'Vide
 media_parameters_config = {
 
   'TV': {
-    'adstock_range': [0, 0.9],
+    'adstock_range': [0, 0.8],
     'halfsat_prior_freq': 3.0,
-    'slope_range': [1.0, 3.0]
+    'slope_range': [1.0, 2.0]
   },
   'Display': {
     'adstock_range': [0, 0.45],

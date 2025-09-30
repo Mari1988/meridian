@@ -28,7 +28,7 @@ class ExportMediaTransformations:
 
   def plot_media_journey_all(self):
     for chnl in self.media_channels:
-      fig = self.plot_media_journey(self.media_trans_journey_df, chnl)
+      fig = self.plot_media_journey_with_kpi(self.media_trans_journey_df, chnl)
       display(fig)
 
   def get_media_transformations_df(self):
@@ -68,9 +68,13 @@ class ExportMediaTransformations:
     saturated_media_tm_df = pd.DataFrame(saturated_media_tm, columns=[f'{m}_saturated' for m in media_channels])
     saturated_media_tm_df.insert(0, 'time', time_coords)
 
+    kpi_df = pd.DataFrame(tf.reduce_sum(self.mmm.kpi, axis=0), columns=['kpi'])
+    kpi_df.insert(0, 'time', time_coords)
+
     media_trans_journey_df = media_scaled_tm_df. \
       merge(adstocked_media_tm_df, on='time', how='left'). \
-        merge(saturated_media_tm_df, on='time', how='left')
+        merge(saturated_media_tm_df, on='time', how='left'). \
+        merge(kpi_df, on='time', how='left')
     media_trans_journey_df['time'] = pd.to_datetime(media_trans_journey_df['time'])
 
     return media_scaled, adstocked_media, saturated_media, media_trans_journey_df
@@ -110,5 +114,31 @@ class ExportMediaTransformations:
     secondary_ax.legend(loc='upper left')
     ax.tick_params(axis='x', rotation=45)
     ax.set_title(f'{chnl} scaled vs adstocked')
+    plt.close()
+    return fig
+
+  @staticmethod
+  def plot_media_journey_with_kpi(data, chnl):
+    """Plot the media journey with kpi."""
+    fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(10, 8))
+
+    # scaled vs adstocked vs saturated
+    sns.lineplot(data=data, x='time', y=f'{chnl}_scaled', ax=ax[0], label='scaled')
+    sns.lineplot(data=data, x='time', y=f'{chnl}_adstocked', ax=ax[0], label='adstocked', color='green')
+    secondary_ax = ax[0].twinx()
+    sns.lineplot(data=data, x='time', y=f'{chnl}_saturated', linestyle='--', ax=secondary_ax, label='saturated', color='red')
+    secondary_ax.legend(loc='upper left')
+    ax[0].tick_params(axis='x', rotation=45)
+    ax[0].set_title(f'{chnl} scaled vs adstocked')
+
+    # saturated vs kpi
+    sns.lineplot(data=data, x='time', y='kpi', ax=ax[1], label='kpi')
+    secondary_ax = ax[1].twinx()
+    sns.lineplot(data=data, x='time', y=f'{chnl}_saturated', linestyle='--', ax=secondary_ax, label='saturated', color='red')
+    secondary_ax.legend(loc='upper left')
+    ax[1].tick_params(axis='x', rotation=45)
+    ax[1].set_title(f'{chnl} saturated vs kpi')
+
+    plt.tight_layout()
     plt.close()
     return fig
