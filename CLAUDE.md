@@ -86,3 +86,4 @@ Meridian is Google's open-source Marketing Mix Modeling (MMM) framework built on
 - **GPU Support**: Recommended for production use, especially for large datasets
 - **Data Format**: Primarily uses xarray.DataArray for multi-dimensional data
 - always use the venv in the project folder
+- always remember to set the model to Default

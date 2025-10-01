@@ -114,25 +114,24 @@ client_config = {
 }
 
 
-ec50_multiplier_config = {'ALDI_US_Starcom': {'Display': 3.71, 'TV': 0.71, 'Video': 1.43},
+ec50_multiplier_config = {'ALDI_US_Starcom': {'Display': 3.71, 'TV': 1.0, 'Video': 1.43},
  'Allergan': {'Display': 4.81, 'TV': 1.3, 'Video': 2.5},
  'Audi': {'Display': 5.42, 'TV': 1.5, 'Video': 2.78},
- 'Burger_King': {'Display': 3.02, 'TV': 0.81, 'Video': 3.33},
- 'Chick-Fil-A': {'Display': np.nan, 'TV': 0.97, 'Video': 3.85},
- 'Chumba_Casino': {'Display': 1.53, 'TV': 0.37, 'Video': 0.52},
+ 'Burger_King': {'Display': 3.02, 'TV': 1.0, 'Video': 3.33},
+ 'Chick-Fil-A': {'Display': np.nan, 'TV': 1.0, 'Video': 3.85},
+ 'Chumba_Casino': {'Display': 1.53, 'TV': 1.0, 'Video': 1.0},
  'Huntington_National_Bank': {'Display': 11.82, 'TV': 1.36, 'Video': 2.7},
  'Hyundai': {'Display': 6.19, 'TV': 1.0, 'Video': 2.17},
  'IBM_-_US': {'Display': 8.12, 'TV': 1.02, 'Video': 1.22},
  'Intuit_-_Quickbooks': {'Display': 10.83, 'TV': 1.2, 'Video': 5.0},
  'Live_Nation_MasterAdvertiser': {'Display': 8.12, 'TV': 1.76, 'Video': 2.94},
- 'MRG_Chevy_LMA': {'Display': 2.83, 'TV': 0.53, 'Video': 1.56},
+ 'MRG_Chevy_LMA': {'Display': 2.83, 'TV': 1.0, 'Video': 1.56},
  'Mattress_Firm_US_Mediavest': {'Display': np.nan, 'TV': 1.11, 'Video': 2.0},
  'Mazda': {'Display': 5.65, 'TV': 1.15, 'Video': 3.57},
- 'Meijer': {'Display': 8.67, 'TV': 0.88, 'Video': 5.0},
+ 'Meijer': {'Display': 8.67, 'TV': 1.0, 'Video': 5.0},
  'Popeyes': {'Display': 3.25, 'TV': 1.5, 'Video': 3.12},
- 'Progressive_Insurance': {'Display': 1.81, 'TV': 0.6, 'Video': 0.94},
- 'Samsung_US_Starcom': {'Display': 9.29, 'TV': 1.2, 'Video': 2.63}
- }
+ 'Progressive_Insurance': {'Display': 1.81, 'TV': 1.0, 'Video': 1.0},
+ 'Samsung_US_Starcom': {'Display': 9.29, 'TV': 1.2, 'Video': 2.63}}
 
 
 media_parameters_config = {
@@ -140,7 +139,7 @@ media_parameters_config = {
   'TV': {
     'adstock_range': [0, 0.8],
     'halfsat_prior_freq': 3.0,
-    'slope_range': [1.0, 2.0]
+    'slope_range': [1.0, 3.0]
   },
   'Display': {
     'adstock_range': [0, 0.45],

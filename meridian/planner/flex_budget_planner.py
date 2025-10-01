@@ -90,6 +90,7 @@ class FlexibleBudgetPlanner:
 
   def _validate_config(self) -> None:
     """Validate that model_config contains required keys."""
+    logging.info(f"Validating config: {self.model_config}")
     # Core required keys (always needed)
     required_keys = [
       'time_col', 'geo_col', 'population_col', 'kpi_type', 'kpi_col'
@@ -393,14 +394,12 @@ class FlexibleBudgetPlanner:
       self.data_df = pd.read_excel(self.file_name, sheet_name='Data')
       logging.info(f"Loaded Data sheet with shape: {self.data_df.shape}")
 
-      # Step 5: Load Parameters sheet (required for ROI, optional for Coefficients)
+      # Step 5: Load Parameters sheet
       try:
         self.parameters_df = pd.read_excel(self.file_name, sheet_name='Parameters')
         logging.info(f"Loaded Parameters sheet with shape: {self.parameters_df.shape}")
       except ValueError:
-        if self.input_type == 'roi':
-          raise ValueError("Parameters sheet is required for ROI input but not found")
-        logging.warning("Parameters sheet not found - skipping")
+        raise ValueError("Parameters sheet is required")
 
       # Step 6: Load coefficient/ROI sheet based on detected type
       if self.input_type == 'coefficients':
