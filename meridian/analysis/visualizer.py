@@ -1405,6 +1405,7 @@ class MediaSummary:
       selected_times: Sequence[str] | None = None,
       marginal_roi_by_reach: bool = True,
       non_media_baseline_values: Sequence[float] | None = None,
+      aggregate_geos: bool = True,
   ):
     """Initializes the media summary metrics based on the model data and params.
 
@@ -1424,6 +1425,9 @@ class MediaSummary:
         value which will be used as baseline for the given channel. If `None`,
         the values defined with `ModelSpec.non_media_baseline_values` will be
         used.
+      aggregate_geos: Boolean. If `True`, the metrics are summed over all
+        regions (national level). If `False`, metrics are calculated at the
+        geo level. Default: `True`.
     """
     self._meridian = meridian
     self._analyzer = analyzer.Analyzer(meridian)
@@ -1431,6 +1435,7 @@ class MediaSummary:
     self._selected_times = selected_times
     self._marginal_roi_by_reach = marginal_roi_by_reach
     self._non_media_baseline_values = non_media_baseline_values
+    self._aggregate_geos = aggregate_geos
 
   @property
   def paid_summary_metrics(self):
@@ -1444,23 +1449,25 @@ class MediaSummary:
 
   @functools.lru_cache(maxsize=128)
   def get_paid_summary_metrics(
-      self, aggregate_times: bool = True
+      self, aggregate_times: bool = True, aggregate_geos: bool | None = None
   ) -> xr.Dataset:
     """Dataset holding the calculated summary metrics for the paid channels.
 
     Args:
       aggregate_times: If `True`, aggregates the metrics across all time
         periods.  If `False`, returns time-varying metrics.
+      aggregate_geos: If `True`, aggregates the metrics across all geos
+        (national level). If `False`, returns geo-level metrics. If `None`,
+        uses the value from the class initialization. Default: `None`.
 
     Returns:
       An `xarray.Dataset` containing the following:
         - **Coordinates:** `channel`, `metric` (`mean`, `median`, `ci_lo`,
-        `ci_hi`),
-          `distribution` (`prior`, `posterior`)
+        `ci_hi`), `distribution` (`prior`, `posterior`), and optionally `geo`
+        (if `aggregate_geos=False`)
         - **Data variables:** `impressions`, `pct_of_impressions`, `spend`,
           `pct_of_spend`, `CPM`, `incremental_outcome`, `pct_of_contribution`,
-          `roi`,
-          `effectiveness`, `mroi`.
+          `roi`, `effectiveness`, `mroi`.
     """
     return self._analyzer.summary_metrics(
         selected_times=self._selected_times,
@@ -1469,6 +1476,9 @@ class MediaSummary:
         confidence_level=self._confidence_level,
         include_non_paid_channels=False,
         aggregate_times=aggregate_times,
+        aggregate_geos=(
+            aggregate_geos if aggregate_geos is not None else self._aggregate_geos
+        ),
     )
 
   @property
@@ -1482,17 +1492,23 @@ class MediaSummary:
     return self.get_all_summary_metrics()
 
   @functools.lru_cache(maxsize=128)
-  def get_all_summary_metrics(self, aggregate_times: bool = True) -> xr.Dataset:
+  def get_all_summary_metrics(
+      self, aggregate_times: bool = True, aggregate_geos: bool | None = None
+  ) -> xr.Dataset:
     """Dataset holding the calculated summary metrics for all channels.
 
     Args:
       aggregate_times: If `True`, aggregates the metrics across all time
         periods.  If `False`, returns time-varying metrics.
+      aggregate_geos: If `True`, aggregates the metrics across all geos
+        (national level). If `False`, returns geo-level metrics. If `None`,
+        uses the value from the class initialization. Default: `None`.
 
     Returns:
       An `xarray.Dataset` containing the following:
         - **Coordinates:** `channel`, `metric` (`mean`, `median`, `ci_lo`,
-          `ci_hi`), `distribution` (`prior`, `posterior`)
+          `ci_hi`), `distribution` (`prior`, `posterior`), and optionally `geo`
+          (if `aggregate_geos=False`)
         - **Data variables:** `incremental_outcome`, `pct_of_contribution`,
           `effectiveness`.
     """
@@ -1503,6 +1519,9 @@ class MediaSummary:
         include_non_paid_channels=True,
         non_media_baseline_values=self._non_media_baseline_values,
         aggregate_times=aggregate_times,
+        aggregate_geos=(
+            aggregate_geos if aggregate_geos is not None else self._aggregate_geos
+        ),
     )
 
   def summary_table(
@@ -1721,6 +1740,7 @@ class MediaSummary:
       selected_times: Sequence[str] | None = None,
       marginal_roi_by_reach: bool = True,
       non_media_baseline_values: Sequence[float] | None = None,
+      aggregate_geos: bool | None = None,
   ):
     """Runs the computation for the media summary metrics with new parameters.
 
@@ -1740,11 +1760,16 @@ class MediaSummary:
         value which will be used as baseline for the given channel. If `None`,
         the values defined with `ModelSpec.non_media_baseline_values` will be
         used.
+      aggregate_geos: Boolean. If `True`, aggregates the metrics across all geos
+        (national level). If `False`, returns geo-level metrics. If `None`, the
+        current aggregate_geos setting is used.
     """
     self._confidence_level = confidence_level or self._confidence_level
     self._selected_times = selected_times
     self._marginal_roi_by_reach = marginal_roi_by_reach
     self._non_media_baseline_values = non_media_baseline_values
+    if aggregate_geos is not None:
+      self._aggregate_geos = aggregate_geos
 
   def plot_channel_contribution_area_chart(
       self, time_granularity: str = c.QUARTERLY

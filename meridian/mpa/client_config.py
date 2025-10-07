@@ -149,7 +149,7 @@ media_parameters_config = {
   'Video': {
     'adstock_range': [0, 0.69],
     'halfsat_prior_freq': 5.0,
-    'slope_range': [1.0, 2.0]
+    'slope_range': [0.5, 1.0]
   }
 
 }

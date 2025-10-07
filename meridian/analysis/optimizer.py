@@ -475,13 +475,19 @@ class OptimizationGrid:
       # Handle divide by zero and calculate ROI
       roi = np.round(tf.math.divide_no_nan(outcome_delta, spend_delta), 8)
       if np.isnan(roi).all():
+        import logging
+        logging.debug(f"Stopping at iteration {i}: all ROIs are NaN. Final spend: {spend}, Total: {np.sum(spend):,.0f}")
         break
 
       # max roi channel's index
       max_roi_idx = np.nanargmax(roi)
       max_roi_value = roi[max_roi_idx]
 
-      # Step 5: Update spend and outcome for max ROI channel
+      # Step 5: Save previous values before updating
+      prev_spend = spend[max_roi_idx]
+      prev_outcome = incremental_outcome[max_roi_idx]
+
+      # Update spend and outcome for max ROI channel
       spend[max_roi_idx] = spend_grid_np[i, max_roi_idx]
       incremental_outcome[max_roi_idx] = outcome_grid_np[i, max_roi_idx]
 
@@ -492,7 +498,63 @@ class OptimizationGrid:
           roi_grid_point=max_roi_value,
           scenario=scenario,
       ):
+        # For fixed budget scenarios, revert the overspend to stay within budget
+        if isinstance(scenario, FixedBudgetScenario):
+          import logging
+          logging.debug(f"Budget exceeded at iteration {i}: total={np.sum(spend):,.0f}, target={scenario.total_budget:,.0f}, reverting channel {max_roi_idx}")
+          spend[max_roi_idx] = prev_spend
+          incremental_outcome[max_roi_idx] = prev_outcome
         break
+
+    # For fixed budget scenarios, allocate any remaining budget
+    if isinstance(scenario, FixedBudgetScenario):
+        target_budget = scenario.total_budget
+        remaining = target_budget - np.sum(spend)
+
+        # Continue allocating remaining budget to channels with highest marginal ROI
+        # even if overall ROI is declining (we must spend the fixed budget)
+        while remaining > 0:
+            best_roi = -np.inf
+            best_channel = None
+            best_spend_level = None
+
+            # Find the channel with best marginal ROI that can accept more spend
+            for ch_idx in range(spend_grid_np.shape[1]):
+                current_spend_ch = spend[ch_idx]
+
+                # Find the next available spend level for this channel in the grid
+                for i in range(spend_grid_np.shape[0]):
+                    grid_spend = spend_grid_np[i, ch_idx]
+                    if np.isnan(grid_spend):
+                        break  # Reached end of valid range for this channel
+
+                    if grid_spend > current_spend_ch and not np.isnan(grid_spend):
+                        # This is the next spend level for this channel
+                        spend_delta = grid_spend - current_spend_ch
+                        outcome_delta = outcome_grid_np[i, ch_idx] - incremental_outcome[ch_idx]
+
+                        # Only consider if spend_delta fits within remaining budget
+                        # and the grid value is valid (not NaN means within constraints)
+                        if spend_delta <= remaining and spend_delta > 0:
+                            marginal_roi = outcome_delta / spend_delta if spend_delta > 0 else 0
+                            if marginal_roi > best_roi:
+                                best_roi = marginal_roi
+                                best_channel = ch_idx
+                                best_spend_level = i
+                        break
+
+            # If we found a channel to allocate to, update it
+            if best_channel is not None:
+                spend[best_channel] = spend_grid_np[best_spend_level, best_channel]
+                incremental_outcome[best_channel] = outcome_grid_np[best_spend_level, best_channel]
+                remaining = target_budget - np.sum(spend)
+            else:
+                # No more channels can accept spend within budget/constraints
+                break
+
+        final_diff = target_budget - np.sum(spend)
+        if abs(final_diff) > 100:  # More than 100 difference
+            print(f"[OPTIMIZER DEBUG] Fixed budget gap: Target={target_budget:,.0f}, Actual={np.sum(spend):,.0f}, Remaining={final_diff:,.0f}")
 
     return spend.astype(int)
 
