@@ -12,3 +12,5 @@ tensorflow >= 2.18, < 2.19
 tensorflow-probability >= 0.25, < 0.26
 tf-keras >= 2.18, < 2.19
 xarray
+seaborn
+openpyxl

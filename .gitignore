@@ -26,3 +26,6 @@ poetry.lock
 
 # pyenv, virtualenv artifacts.
 .python-version
+
+# Pickle files (serialized model objects)
+*.pkl
