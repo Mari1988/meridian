@@ -1,0 +1,577 @@
+<!--
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://www.gstatic.com/external_hosted/vega/vega.js"></script>
+    <script src="https://www.gstatic.com/external_hosted/vega_lite/vega-lite.js"></script>
+    <script src="https://www.gstatic.com/external_hosted/vega_embed/vega-embed.js"></script>
+    <title>
+      Model health summary card
+    </title>
+    <link href="https://fonts.googleapis.com/css?family=Google+Sans:400,500,700&amp;subset=cyrillic,cyrillic-ext,latin-ext"
+          rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined"
+          rel="stylesheet" />
+    <style>
+      /**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+body {
+  background: #fafbfb;
+  font-family: "Google Sans Display", "Google Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  flex-shrink: 0; }
+
+.header {
+  height: 40px;
+  margin-top: 26px;
+  margin-left: 30px;
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  column-gap: 28px; }
+
+.logo {
+  width: 40px;
+  height: 40px; }
+
+.title {
+  color: var(--grey-900, #202124);
+  font-family: "Google Sans Display", "Google Sans", sans-serif;
+  font-size: 24px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 32px; }
+
+chips {
+  display: inline-flex;
+  gap: 8px;
+  padding-top: 36px;
+  padding-bottom: 32px;
+  padding-left: 29px;
+  flex-shrink: 0; }
+
+chip {
+  display: inline-flex;
+  height: 32px;
+  padding: 6px 12px;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  border-radius: 100px;
+  background: var(--blue-50, #e8f0fe);
+  color: var(--blue-700, #1967d2);
+  text-align: center;
+  font-family: "Google Sans Display", "Google Sans", sans-serif;
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0.25px; }
+
+cards {
+  display: flex;
+  flex-direction: column;
+  row-gap: 32px;
+  margin: 32px 32px 0px 50px; }
+
+card {
+  border-radius: 8px;
+  border: 1px solid var(--grey-300, #dadce0);
+  background: #fff;
+  display: flex;
+  flex-direction: column; }
+  card > card-title {
+    padding: 22px 32px;
+    color: var(--grey-900, #202124);
+    font-family: "Google Sans Display", "Google Sans", sans-serif;
+    font-size: 28px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 50px; }
+  card > card-insights {
+    background: #eee; }
+  card errors,
+  card warnings,
+  card infos {
+    margin-top: -39px;
+    margin-left: -69px;
+    margin-right: -69px; }
+  card errors {
+    background: #f8d7da; }
+  card warnings {
+    background: #fff3cd; }
+  card infos {
+    background: #dae8fc; }
+  card > card-insights,
+  card errors,
+  card warnings,
+  card infos {
+    display: flex;
+    flex-direction: row;
+    padding: 22px 20px; }
+    card > card-insights p,
+    card errors p,
+    card warnings p,
+    card infos p {
+      margin: 0px 25px;
+      color: var(--Grey-800, #3c4043);
+      font-family: Roboto;
+      font-size: 16px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 24px;
+      letter-spacing: 0.1px; }
+
+/* [charts] container is a flexbox that will contain [chart] child elements. */
+charts {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-between;
+  gap: 50px;
+  padding: 59px 69px; }
+  charts chart {
+    display: flex;
+    flex-flow: column nowrap;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%; }
+    charts chart > chart-description {
+      color: var(--Grey-800, #3c4043);
+      font-family: "Google Sans Display", "Google Sans", sans-serif;
+      font-size: 12px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 16px;
+      max-width: 450px; }
+  charts chart-embed {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    padding: 10px 5px 20px 2px; }
+  charts chart-table {
+    display: flex;
+    flex-flow: column nowrap;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%; }
+    charts chart-table .chart-table-title {
+      color: var(--Grey-800, #3c4043);
+      font-family: "Google Sans Display", "Google Sans", sans-serif;
+      font-size: 18px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 24px;
+      margin-bottom: 10px; }
+    charts chart-table .chart-table-content {
+      color: var(--Grey-800, #3c4043);
+      font-family: Roboto;
+      font-size: 14px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 20px;
+      letter-spacing: 0.2px;
+      width: 100%;
+      overflow-x: auto;
+      padding-bottom: 20px; }
+      charts chart-table .chart-table-content table {
+        border-radius: 4px;
+        border: 1px solid var(--grey-300, #dadce0);
+        border-spacing: 0;
+        border-collapse: collapse; }
+      charts chart-table .chart-table-content tr {
+        border-radius: 4px;
+        border: 1px solid var(--grey-300, #dadce0);
+        border-spacing: 0;
+        border-collapse: collapse; }
+        charts chart-table .chart-table-content tr th,
+        charts chart-table .chart-table-content tr td {
+          padding: 18px 16px; }
+    charts chart-table .chart-table-description {
+      color: var(--Grey-800, #3c4043);
+      font-family: "Google Sans Display", "Google Sans", sans-serif;
+      font-size: 12px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 16px;
+      max-width: 450px; }
+    charts chart-table finding {
+      display: flex;
+      width: fit-content;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
+      padding: 4px 12px;
+      border-radius: 16px;
+      margin: 2px 4px 2px 0;
+      font-family: "Google Sans Display", "Google Sans", sans-serif;
+      font-weight: 500;
+      font-size: 13px;
+      line-height: 20px; }
+      charts chart-table finding.error {
+        background-color: #f8d7da;
+        color: var(--Red-600, #d93025); }
+      charts chart-table finding.attention {
+        background-color: #fff3cd;
+        color: #664d03; }
+      charts chart-table finding.info {
+        background-color: #dae8fc;
+        color: var(--blue-700, #1967d2); }
+
+stats-section {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: flex-start;
+  gap: 40px;
+  padding: 32px; }
+  stats-section stats {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto; }
+    stats-section stats > stats-title {
+      color: var(--grey-900, #202124);
+      font-family: Roboto;
+      font-size: 14px;
+      font-style: normal;
+      font-weight: 500;
+      line-height: 20px;
+      letter-spacing: 0.25px; }
+    stats-section stats > stat {
+      color: var(--Grey-800, #3c4043);
+      font-family: Roboto;
+      font-size: 32px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 40px; }
+    stats-section stats > delta {
+      color: var(--Grey-800, #3c4043);
+      font-family: Roboto;
+      font-size: 18px;
+      font-style: normal;
+      font-weight: 500;
+      line-height: 20px;
+      letter-spacing: 0.25px; }
+    stats-section stats .green-text {
+      color: var(--Green-500, #34a853); }
+    stats-section stats .red-text {
+      color: var(--Red-600, #d93025); }
+
+/* Model Health Summary Card Styles */
+.health-score-section {
+  display: flex;
+  padding: 32px;
+  gap: 40px; }
+
+.score-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px; }
+
+.score-chart-and-value {
+  display: flex;
+  align-items: center;
+  gap: 20px; }
+
+.health-score-chart {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: conic-gradient(#6ba4ff calc(var(--score) * 1%), #eee 0);
+  display: flex;
+  justify-content: center;
+  align-items: center; }
+  .health-score-chart::before {
+    content: '';
+    position: absolute;
+    width: 74px;
+    height: 74px;
+    background: #fff;
+    border-radius: 50%; }
+
+.score-value {
+  font-size: 36px; }
+
+.score-label {
+  font-size: 16px;
+  font-weight: 500; }
+
+.score-explanation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px; }
+  .score-explanation .explanation-title {
+    font-size: 16px;
+    font-weight: 500; }
+  .score-explanation p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 20px; }
+
+.status-banner-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  font-size: 14px; }
+  .status-banner-strip.fail {
+    background-color: var(--red-50, #fce8e6);
+    color: var(--red-700, #c5221f); }
+    .status-banner-strip.fail .material-icons-outlined {
+      color: var(--Red-600, #d93025); }
+  .status-banner-strip.info {
+    background-color: var(--blue-50, #e8f0fe);
+    color: var(--blue-700, #1967d2); }
+    .status-banner-strip.info .material-icons-outlined {
+      color: var(--blue-700, #1967d2); }
+
+.metrics-section {
+  padding: 32px; }
+  .metrics-section .section-title {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 24px; }
+
+.metrics-table {
+  font-size: 14px; }
+  .metrics-table th {
+    text-align: left;
+    font-weight: 500;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--grey-300, #dadce0); }
+  .metrics-table td {
+    padding: 24px 0;
+    border-bottom: 1px solid #f1f3f4;
+    vertical-align: top; }
+    .metrics-table td:first-child {
+      width: 250px;
+      font-weight: 500; }
+    .metrics-table td:nth-child(2) {
+      width: 200px; }
+  .metrics-table tr:last-child td {
+    border-bottom: none; }
+
+.status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start; }
+  .status-cell .stats-text {
+    font-size: 12px; }
+
+chip.pass {
+  background-color: var(--green-50, #e6f4ea);
+  color: var(--green-800, #137333); }
+
+chip.review {
+  background-color: var(--yellow-50, #fef7e0);
+  color: #b06000; }
+
+chip.fail {
+  background-color: var(--red-50, #fce8e6);
+  color: var(--red-700, #c5221f); }
+
+/* Force white background and black text for Model Health Summary Card */
+.model-health-card {
+  background-color: #fff !important;
+  color: #000 !important; }
+  .model-health-card * {
+    color: #000 !important; }
+  .model-health-card a {
+    color: #1967d2 !important; }
+  .model-health-card chip {
+    color: var(--blue-700, #1967d2) !important; }
+  .model-health-card chip.pass {
+    color: var(--green-800, #137333) !important; }
+  .model-health-card chip.review {
+    color: #b06000 !important; }
+  .model-health-card chip.fail {
+    color: var(--red-700, #c5221f) !important; }
+  .model-health-card .status-banner-strip.fail {
+    background-color: var(--red-50, #fce8e6) !important;
+    color: var(--red-700, #c5221f) !important; }
+    .model-health-card .status-banner-strip.fail .material-icons-outlined {
+      color: var(--Red-600, #d93025) !important; }
+  .model-health-card .status-banner-strip.info {
+    background-color: var(--blue-50, #e8f0fe) !important;
+    color: var(--blue-700, #1967d2) !important; }
+    .model-health-card .status-banner-strip.info .material-icons-outlined {
+      color: var(--blue-700, #1967d2) !important; }
+
+.channel-recommendation-card {
+  background-color: #fff;
+  color: #000; }
+
+.channel-recommendation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  table-layout: fixed; }
+  .channel-recommendation-table th {
+    text-align: center;
+    font-weight: 500;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--grey-300, #dadce0); }
+    .channel-recommendation-table th:first-child {
+      text-align: left;
+      width: 220px; }
+  .channel-recommendation-table td {
+    padding: 16px 0;
+    border-bottom: 1px solid #f1f3f4;
+    vertical-align: middle;
+    text-align: center; }
+    .channel-recommendation-table td:first-child {
+      text-align: left;
+      font-weight: 500; }
+    .channel-recommendation-table td chip {
+      margin: 0 auto; }
+
+.calibrated-row-cell {
+  padding-right: 16px; }
+
+chip.calibrated-wide {
+  background-color: #f1f3f4;
+  color: #5f6368;
+  width: 100%;
+  justify-content: center;
+  box-sizing: border-box; }
+    </style>
+  </head>
+
+  <body>
+    <div class="header">
+      <div class="logo">
+        
+      </div>
+      <div class="title">
+        Model health summary card
+      </div>
+    </div>
+
+    
+
+    <cards>
+      
+       
+        
+
+<card class="model-health-card">
+  <div class="health-score-section">
+    <div class="score-container">
+      <div class="score-label">Model health score</div>
+      <div class="score-chart-and-value">
+        <div class="health-score-chart" style="--score: 99.99126995311065">
+        </div>
+        <div class="score-value">100.0</div>
+      </div>
+    </div>
+    <div class="score-explanation">
+      <div class="explanation-title">How is health score measured?</div>
+      <p>
+        The Meridian model health score gives a unified view of model integrity
+        by combining six individual health checks into one metric ranging from 0
+        to 100. While individual diagnostics provide granular insights into
+        specific model components, the model health score provides an aggregate
+        measure on a model's health for causal inference. See
+        <a href="https://developers.google.com/meridian/docs/post-modeling/health-score" target="_blank">Model health score</a>
+        to learn more.
+      </p>
+    </div>
+  </div>
+
+  
+  <div class="status-banner-strip info">
+     <span class="material-icons-outlined">check_circle</span>
+     <span>Passed: No major quality issues were identified.</span>
+  </div>
+  
+
+  <div class="metrics-section">
+    <div class="section-title">Metrics check</div>
+    <table class="metrics-table">
+      <thead>
+        <tr>
+          <th>Metric check</th>
+          <th>Status</th>
+          <th>Recommended action</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>Convergence</td>
+          <td><chip class="pass">Pass</chip></td>
+          <td>The model has likely converged, as all parameters have R-hat values < 1.2.</td>
+        </tr>
+        
+        <tr>
+          <td>Baseline</td>
+          <td><chip class="pass">Pass</chip></td>
+          <td>The posterior probability that the baseline is negative is 0.00. We recommend visually inspecting the baseline time series in the Model Fit charts to confirm this.</td>
+        </tr>
+        
+        <tr>
+          <td>Bayesian p-value</td>
+          <td><chip class="pass">Pass</chip></td>
+          <td>The Bayesian posterior predictive p-value is 1.00. The observed total outcome is consistent with the model's posterior predictive distribution.</td>
+        </tr>
+        
+        <tr>
+          <td>Goodness of fit</td>
+          <td><chip class="pass">Pass</chip></td>
+          <td>R-squared = 0.9803, MAPE = 0.1372, and wMAPE = 0.0924. These goodness-of-fit metrics are intended for guidance and relative comparison.</td>
+        </tr>
+        
+        
+        <tr>
+          <td>Prior-posterior shift</td>
+          <td>
+            <div class="status-cell">
+              
+                 <chip class="pass">Pass</chip>
+              
+              <div class="stats-text">3/3 channels passed</div>
+            </div>
+          </td>
+          <td>The model has successfully learned from the data. This is a positive sign that your data was informative.</td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+
+</card>
+      
+    </cards>
+  </body>
+</html>

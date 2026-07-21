@@ -7,10 +7,14 @@ _pycache__/
 
 # Poetry, setuptools, PyPI distribution artifacts.
 /*.egg-info
+**/*.egg-info
 .eggs/
 build/
 dist/
 poetry.lock
+
+# Generated protobuf code.
+proto/mmm/**/*_pb2.py
 
 # Tests
 .pytest_cache/
@@ -26,3 +30,6 @@ poetry.lock
 
 # pyenv, virtualenv artifacts.
 .python-version
+
+# virtualenv
+.venv/
