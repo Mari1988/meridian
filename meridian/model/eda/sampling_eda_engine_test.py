@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Sequence
 import dataclasses
+import math
 from unittest import mock
 
 from absl.testing import absltest

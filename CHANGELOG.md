@@ -23,8 +23,16 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-20
+
+*   Enable `MeridianEDA._generate_prior_specifications_card` and
+    `MeridianEDA.plot_prior_mean` for national models.
 *   Fix `ValueError: Interval length between selected times must be consistent`
     when serializing models with calendar-monthly or quarterly time coordinates.
+*   Fix a silent attribution misalignment bug in `InputData` and `InputDataBuilder` by enforcing strict exact coordinate match ordering across channels.
+*   Fix backward-compatibility deserialization error for older legacy models
+    saved with Automatic Knot Selection (`enable_aks=True`).
+*   Fix OLS residual variance calculation (use `mse_resid` rather than `mse_resid ** 2`) in Automatic Knot Selection.
 
 ## [1.7.0] - 2026-06-17
 
@@ -516,4 +524,5 @@ To release a new version (e.g. from `1.0.0` -> `2.0.0`):
 [1.6.1]: https://github.com/google/meridian/releases/tag/v1.6.1
 [1.6.2]: https://github.com/google/meridian/releases/tag/v1.6.2
 [1.7.0]: https://github.com/google/meridian/releases/tag/v1.7.0
-[Unreleased]: https://github.com/google/meridian/compare/v1.7.0...HEAD
+[1.7.1]: https://github.com/google/meridian/releases/tag/v1.7.1
+[Unreleased]: https://github.com/google/meridian/compare/v1.7.1...HEAD

@@ -15,7 +15,8 @@
 """Data structures for the Model Quality Checks results."""
 
 import abc
-from collections.abc import Mapping
+import collections
+from collections.abc import Mapping, Sequence
 import dataclasses
 import enum
 import functools
@@ -675,13 +676,25 @@ class ImplausibleROIChannelResult(ChannelResult):
 
 @dataclasses.dataclass(frozen=True)
 class ImplausibleROICheckResult(CheckResult):
-  """The immutable result of model-level Implausible ROI Check."""
+  """The immutable result of model-level Implausible ROI Check.
+
+  Attributes:
+    case: The aggregate case for the implausible ROI check across all channels.
+    channel_results: A list of `ImplausibleROIChannelResult` for each channel.
+    high_roi_channels: A list of channel names flagged as having high ROI.
+    low_roi_channels: A list of channel names flagged as having low ROI.
+    aggregate_details: Additional details of the aggregate check result.
+    roi_upper_bound: The upper bound for plausible ROI.
+    roi_lower_bound: The lower bound for plausible ROI.
+  """
 
   case: ImplausibleROIAggregateCases
   channel_results: list[ImplausibleROIChannelResult]
   high_roi_channels: list[str]
   low_roi_channels: list[str]
   aggregate_details: Mapping[str, Any]
+  roi_upper_bound: float = configs.ImplausibleROIConfig.roi_upper_bound
+  roi_lower_bound: float = configs.ImplausibleROIConfig.roi_lower_bound
 
   @property
   def details(self) -> Mapping[str, Any]:
@@ -763,11 +776,15 @@ class HighVarianceCheckResult(CheckResult):
     channel_results: A list of `HighVarianceChannelResult` for each channel.
     high_variance_channels: A list of channel names flagged as having high ROI
       variance.
+    prior_relative_hdi_width: The prior relative HDI width threshold.
   """
 
   case: HighVarianceAggregateCases
   channel_results: list[HighVarianceChannelResult]
   high_variance_channels: list[str]
+  prior_relative_hdi_width: float = (
+      constants.PRIOR_RELATIVE_HDI_WIDTH_FOR_80_PERCENT
+  )
 
   @property
   def details(self) -> Mapping[str, Any]:
@@ -850,6 +867,9 @@ class PotentialBiasCheckResult(CheckResult):
   channel_results: list[PotentialBiasChannelResult]
   low_correlation_channels: list[str]
   correlation_matrix: xr.DataArray
+  correlation_threshold: float = (
+      configs.PotentialBiasConfig.correlation_threshold
+  )
 
   @property
   def details(self) -> Mapping[str, Any]:
@@ -886,7 +906,7 @@ _CALIBRATION_CHECK_RESULTS = (
 # ==============================================================================
 # Review Summary
 # ==============================================================================
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=False)
 class ReviewSummary:
   """The final summary of all model quality checks.
 
@@ -895,7 +915,7 @@ class ReviewSummary:
     summary_message: A summary message of all checks.
     results: A list of all check results.
     health_score: The health score of the model.
-  """
+  """  # fmt: skip
 
   overall_status: Status
   summary_message: str

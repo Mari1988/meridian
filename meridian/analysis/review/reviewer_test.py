@@ -19,6 +19,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import arviz as az
 import immutabledict
+from meridian import backend
 from meridian import constants
 from meridian.analysis import analyzer as analyzer_module
 from meridian.analysis.review import checks
@@ -1015,7 +1016,6 @@ class ReviewerTest(parameterized.TestCase):
             'ROIConsistencyCheckResult': 'PASS',
         },
     )
-
 
 if __name__ == '__main__':
   absltest.main()

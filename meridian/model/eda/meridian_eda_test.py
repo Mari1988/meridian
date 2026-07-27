@@ -34,6 +34,7 @@ from meridian.model.eda import eda_outcome
 from meridian.model.eda import eda_spec
 from meridian.model.eda import meridian_eda
 from meridian.model.eda import sampling_eda_engine
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -460,7 +461,7 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
     self._mock_eda_engine.check_cost_per_media_unit.return_value = (
         eda_outcome.EDAOutcome(
             check_type=eda_outcome.EDACheckType.COST_PER_MEDIA_UNIT,
-            findings=cpmu_findings or [],  # pyrefly: ignore[bad-argument-type]
+            findings=list(cpmu_findings) if cpmu_findings else [],
             analysis_artifacts=[],
         )
     )
@@ -469,17 +470,17 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
         eda_outcome.CriticalCheckEDAOutcomes(
             multicollinearity=eda_outcome.EDAOutcome(
                 check_type=eda_outcome.EDACheckType.MULTICOLLINEARITY,
-                findings=vif_findings or [],  # pyrefly: ignore[bad-argument-type]
+                findings=list(vif_findings) if vif_findings else [],
                 analysis_artifacts=[],
             ),
             pairwise_correlation=eda_outcome.EDAOutcome(
                 check_type=eda_outcome.EDACheckType.PAIRWISE_CORRELATION,
-                findings=pairwise_findings or [],  # pyrefly: ignore[bad-argument-type]
+                findings=list(pairwise_findings) if pairwise_findings else [],
                 analysis_artifacts=[],
             ),
             kpi_invariability=eda_outcome.EDAOutcome(
                 check_type=eda_outcome.EDACheckType.KPI_INVARIABILITY,
-                findings=kpi_findings or [],  # pyrefly: ignore[bad-argument-type]
+                findings=list(kpi_findings) if kpi_findings else [],
                 analysis_artifacts=[],
             ),
         )
@@ -651,7 +652,7 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
     self._mock_eda_engine.check_std.side_effect = (
         lambda: eda_outcome.EDAOutcome(
             check_type=eda_outcome.EDACheckType.STANDARD_DEVIATION,
-            findings=stdev_findings or [],  # pyrefly: ignore[bad-argument-type]
+            findings=list(stdev_findings) if stdev_findings else [],
             analysis_artifacts=[
                 national_stdev_artifact
                 if self._meridian.is_national
@@ -664,7 +665,9 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
         eda_outcome.EDAOutcome(
             check_type=eda_outcome.EDACheckType.POPULATION_CORRELATION,
             findings=[],
-            analysis_artifacts=pop_raw_media_artifacts or [],  # pyrefly: ignore[bad-argument-type]
+            analysis_artifacts=list(pop_raw_media_artifacts)
+            if pop_raw_media_artifacts
+            else [],
         )
     )
 
@@ -676,20 +679,23 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
             severity=Severity.INFO,
             finding_cause=Cause.NONE,
             explanation=pop_treatment_explanation,
-            associated_artifact=next(iter(pop_treatment_artifacts or []), None),
+            associated_artifact=next(iter(pop_treatment_artifacts or ()), None),
         )
     ]
     self._mock_eda_engine.check_population_corr_scaled_treatment_control.return_value = eda_outcome.EDAOutcome(
         check_type=eda_outcome.EDACheckType.POPULATION_CORRELATION,
         findings=pop_treatment_findings,
-        analysis_artifacts=pop_treatment_artifacts or [],  # pyrefly: ignore[bad-argument-type]
+        analysis_artifacts=list(pop_treatment_artifacts)
+        if pop_treatment_artifacts
+        else [],
     )
     self._mock_eda_engine.check_prior_probability.return_value = (
         eda_outcome.EDAOutcome(
             check_type=eda_outcome.EDACheckType.PRIOR_PROBABILITY,
             findings=[],
-            analysis_artifacts=prior_artifacts  # pyrefly: ignore[bad-argument-type]
-            or [_create_prior_artifact([1, 2])],
+            analysis_artifacts=list(prior_artifacts)
+            if prior_artifacts
+            else [_create_prior_artifact([1, 2])],
         )
     )
 
@@ -2386,9 +2392,31 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
     actual_values = sorted(plot.data[eda_constants.VALUE].tolist())
     np.testing.assert_allclose(actual_values, [-0.2, 0.5])
 
+  def test_plot_prior_mean_national_success(self):
+    self._meridian.is_national = True
+    artifact = _create_prior_artifact([0.5, -0.2])
+    mock_outcome = _create_eda_outcome(
+        check_type=eda_outcome.EDACheckType.PRIOR_PROBABILITY,
+        analysis_artifacts=[artifact],
+    )
+
+    self.enter_context(
+        mock.patch.object(
+            self._mock_eda_engine,
+            'check_prior_probability',
+            return_value=mock_outcome,
+        )
+    )
+
+    plot = self._eda.plot_prior_mean()
+
+    actual_values = sorted(plot.data[eda_constants.VALUE].tolist())
+    np.testing.assert_allclose(actual_values, [-0.2, 0.5])
+
   # ============================================================================
   # Error Scenarios
   # ============================================================================
+
   def test_plot_error_invalid_geo(self):
     self._mock_eda_engine.kpi_scaled_da = xr.DataArray(
         np.zeros((_N_GEOS, _N_TIMES)),
@@ -2451,11 +2479,6 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
     self._meridian.is_national = True
     with self.assertRaises(eda_engine.GeoLevelCheckOnNationalModelError):
       getattr(self._eda, plotting_function_name)()
-
-  def test_plot_prior_mean_national_raises(self):
-    self._meridian.is_national = True
-    with self.assertRaises(eda_engine.GeoLevelCheckOnNationalModelError):
-      self._eda.plot_prior_mean()
 
   # ============================================================================
   # Report Generation and HTML Structure Tests
@@ -2959,6 +2982,20 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
           ],
           prior_artifacts=[_create_prior_artifact([0.5, 0.6])],
       ),
+      dict(
+          testcase_name='prior_specifications_card_national_clean',
+          is_national=True,
+          card_id=eda_constants.PRIOR_SPECIFICATIONS_CARD_ID,
+          card_title=eda_constants.PRIOR_SPECIFICATIONS_CARD_TITLE,
+          expected_ids=[
+              eda_constants.PRIOR_CHART_ID,
+          ],
+          missing_ids=[],
+          expected_text=[
+              'Negative baseline is equivalent to the treatment effects'
+          ],
+          prior_artifacts=[_create_prior_artifact([0.5, 0.6])],
+      ),
   )
   def test_card_structure_scenarios(
       self,
@@ -3243,22 +3280,6 @@ class MeridianEdaTestWithMockEngine(backend_test_utils.MeridianTestCase):
     self.assertIsNone(
         card,
         'Population Scaling card should not be present in the report for'
-        ' national models.',
-    )
-
-  def test_prior_specifications_card_national_is_none(self):
-    self._stub_plotters()
-    self._meridian.is_national = True
-    self._stub_engine_checks()
-
-    dom = self._get_output_eda_report_html_dom()
-    card = dom.find(
-        f".//card[@id='{eda_constants.PRIOR_SPECIFICATIONS_CARD_ID}']"
-    )
-
-    self.assertIsNone(
-        card,
-        'Prior Specifications card should not be present in the report for'
         ' national models.',
     )
 
