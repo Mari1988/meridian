@@ -1,4 +1,11 @@
-"""Synthetic geo x time media data simulator.
+"""Synthetic geo x time media data simulator (archival pre-simplification copy).
+
+This is a snapshot of `data_simulator.py` kept for reference before it was
+simplified (fewer stacked media-execution layers) to support a cleaner,
+easier-to-defend "default priors vs. informed priors" case study. Import this
+module directly (not via `data_simulator`) if you need the older, richer
+media-execution mechanics (seasonal jitter, ramp-smoothed flighting, trend,
+promo spikes).
 
 Reproduces the causal, ground-truth-parameterized data-generating process
 used by `simulate_media_data_reach_frequency_state_geo.ipynb`: geo
@@ -12,14 +19,6 @@ Each `simulate_*` / `transform_media` / `generate_kpi_and_revenue` /
 reproduces one numbered section of the original notebook and stores its
 outputs as attributes on `self`, so a notebook can call them step by step and
 inspect or plot intermediate tensors in between.
-
-Media execution (`simulate_media`) is deliberately kept to three named,
-independently-justified layers -- a shared seasonal signal, per-channel
-on/off flighting, and per-channel AR(1) noise -- rather than a larger stack
-of mechanisms, so the DGP stays simple enough to state and audit in a single
-paragraph. See `data_simulator_v1_complex.py` for an earlier, richer version
-(seasonal jitter, ramp-smoothed flighting, secular trend, promo spikes) kept
-for reference.
 """
 
 import dataclasses
@@ -150,28 +149,13 @@ class SimulationConfig:
   current_reach_frac: dict[str, float] = dataclasses.field(
       default_factory=lambda: {'TV': 0.20, 'Display': 0.5, 'Social': 0.9}
   )
-  # Weekly frequency target (impressions per person reached), per channel.
-  frequency_range: dict[str, tuple[float, float]] = dataclasses.field(
-      default_factory=lambda: {
-          'TV': (1.0, 5.0),
-          'Display': (1.0, 5.0),
-          'Social': (1.0, 5.0),
-      }
-  )
+  # Weekly frequency target (impressions per person reached), all channels.
+  frequency_range: tuple[float, float] = (1.0, 5.0)
+  enable_ramp: bool = False
+  ramp_weeks: int = 10
+  time_reach_noise_sd: float = 0.03
   frequency_noise_sd: float = 0.1
   geo_audience_heterogeneity_sd: float = 0.12
-  # The fixed weekly "effective frequency" at which half of a channel's
-  # target audience is assumed to produce half-saturation, used to derive
-  # the ground-truth `ec_m` in `simulate_adstock_hill_params()`. Deliberately
-  # a constant, literature-motivated threshold (Krugman's three-hit theory /
-  # Naples' effective-frequency guidance, commonly cited around 3-4
-  # exposures/week) rather than each channel's own `mean_frequency_m` -- so
-  # `ec_m` no longer automatically tracks a channel's current execution
-  # frequency, and a channel's actual weekly frequency genuinely competes
-  # against this threshold instead of canceling out of the `ec_m` ratio.
-  saturation_frequency: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 4.0, 'Display': 4.0, 'Social': 4.0}
-  )
 
   # --- Time-varying execution multipliers layered on top of the flat
   # `current_reach_frac` target below (Section 3), each an independently
@@ -194,102 +178,94 @@ class SimulationConfig:
       default_factory=lambda: {'TV': 0.6, 'Display': 0.3, 'Social': 0.1}
   )
 
-  # Flighting: channels are bought in discrete on/off runs rather than
-  # continuously. Each channel picks one of two textures via `flight_style`,
-  # both built from the same renewal-process mechanism (alternating runs
-  # whose *lengths* are randomly drawn, not their week-by-week on/off state):
-  #  - 'flighting' (TV, Display): burst/dark run lengths are drawn from a
-  #    Gamma distribution with mean `flight_burst_weeks`/`flight_dark_weeks`
-  #    and spread `flight_burst_cv`/`flight_dark_cv`, rounded to whole weeks.
-  #    A *memoryless* (geometric) run-length model was tried first and
-  #    rejected: with mean 8, ~1/3 of its runs land at 1-3 weeks purely by
-  #    chance, which no real media plan would produce -- a planner commits
-  #    to a flight length in advance, so real/practitioner run lengths
-  #    cluster tightly around their target instead of spanning 1-26 weeks in
-  #    a single realization. The default CVs (0.6 burst, 0.9 dark) are fit
-  #    against the empirical on/off run-length spread in the Robyn/Garve
-  #    open MMM demo dataset (github.com/Garve/datasets, mmm.csv) -- a
-  #    synthetic dataset, but one built by MMM practitioners specifically to
-  #    mimic real client delivery, and the closest freely-available reference
-  #    for this shape. `flight_floor` is the residual multiplier during a
-  #    dark run -- never exactly 0, since there's usually some always-on
-  #    baseline activity.
-  #  - 'continuity' (Social): always-on, with short sharp promotional spikes
-  #    (`continuity_spike_weeks`/`continuity_spike_cv`) recurring every
-  #    `continuity_gap_weeks` (+/- `continuity_gap_cv`) at
-  #    `continuity_spike_amplitude` above baseline, then renormalized to
-  #    mean 1 over the horizon. Calibrated against a real (not synthetic)
-  #    weekly TV-GRP series -- a Shenzhen TV-manufacturer dataset
-  #    (github.com/jamesrawlins1000/Market-mix-modelling-data) -- which
-  #    shows recurring peaks roughly every 5 weeks (CV ~0.57) at ~1.9x the
-  #    baseline level, rather than a single smooth annual cycle.
-  #
-  # TV is bought in short, sharp flights with long dark gaps (typical
-  # linear-TV campaign buying); Display is given long, slow-changing cycles
-  # matching real programmatic-display delivery (see `reach_noise_ar1_phi`
-  # below). Social's `flight_burst_weeks`/`flight_dark_weeks`/`flight_floor`
-  # entries below are unused defaults, kept only so the dicts have a value
-  # for every channel -- switching Social's `flight_style` back to
-  # 'flighting' would make them active again.
-  flight_style: dict[str, str] = dataclasses.field(
-      default_factory=lambda: {
-          'TV': 'flighting',
-          'Display': 'flighting',
-          'Social': 'continuity',
-      }
-  )
+  # Flighting: channels are bought in discrete on/off bursts rather than
+  # continuously (a two-state Markov chain with average "on"/"off" run
+  # lengths `flight_burst_weeks`/`flight_dark_weeks`). `flight_floor` is the
+  # residual multiplier during a dark period -- never exactly 0, since
+  # there's usually some always-on baseline activity. TV is bought in
+  # short, sharp flights with long dark gaps (typical linear-TV campaign
+  # buying); Display flights around promo weeks with a moderate floor;
+  # Social is modeled as effectively always-on, with a high floor, matching
+  # always-on programmatic/social buying. Its burst length isn't set here --
+  # `default_factory` lambdas can't see sibling fields -- but tied to
+  # `n_times` in `__post_init__` below, so it scales with the horizon
+  # instead of being hardcoded to a specific `n_times` value.
   flight_burst_weeks: dict[str, int] = dataclasses.field(
-      default_factory=lambda: {'TV': 8, 'Display': 12, 'Social': 2}
+      default_factory=lambda: {'TV': 8, 'Display': 2, 'Social': 2}
   )
   flight_dark_weeks: dict[str, int] = dataclasses.field(
-      default_factory=lambda: {'TV': 8, 'Display': 12, 'Social': 2}
-  )
-  flight_burst_cv: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 0.6, 'Display': 0.6, 'Social': 0.6}
-  )
-  flight_dark_cv: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 0.9, 'Display': 0.9, 'Social': 0.9}
+      default_factory=lambda: {'TV': 8, 'Display': 2, 'Social': 2}
   )
   flight_floor: dict[str, float] = dataclasses.field(
       default_factory=lambda: {'TV': 0.2, 'Display': 0.5, 'Social': 0.5}
   )
-  continuity_spike_weeks: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 1, 'Display': 1, 'Social': 1}
+  # How strongly each channel's flighting Markov chain (above) is pulled
+  # toward the shared seasonal calendar (`seasonal_index_t`, see
+  # `seasonal_amplitude` above): at 0, burst/dark transitions are calendar-
+  # blind and `flight_burst_weeks`/`flight_dark_weeks` are the exact average
+  # on/off durations (the old behavior); above 0, transitioning "on" gets
+  # more likely and "off" less likely as the calendar approaches
+  # `demand_seasonal_peak_week` (and vice versa near the trough), so those
+  # durations become baselines that stretch near-peak and compress off-peak
+  # -- i.e. bursts cluster around the same calendar window every year,
+  # matching how real campaigns are deliberately planned around seasonal
+  # demand rather than firing at random. TV is most calendar-driven
+  # (holiday-driven linear-TV buying), Display moderately so (promo-
+  # calendar buying); Social is small since it's already modeled as
+  # always-on, with just a slight seasonal lean on top.
+  flight_seasonal_bias: dict[str, float] = dataclasses.field(
+      default_factory=lambda: {'TV': 0.6, 'Display': 0.1, 'Social': 0.1}
   )
-  continuity_spike_cv: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 0.3, 'Display': 0.3, 'Social': 0.3}
+  # Number of weeks over which a flight's on/off transition ramps rather than
+  # jumping instantly between `flight_floor` and 1.0 -- real campaigns are
+  # trafficked/wound down gradually, not switched on a single week. Applied
+  # as a symmetric triangular smoothing kernel over the raw Markov state.
+  flight_ramp_weeks: dict[str, int] = dataclasses.field(
+      default_factory=lambda: {'TV': 2, 'Display': 1, 'Social': 1}
   )
-  continuity_gap_weeks: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 5, 'Display': 5, 'Social': 5}
-  )
-  continuity_gap_cv: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 0.57, 'Display': 0.57, 'Social': 0.57}
-  )
-  continuity_spike_amplitude: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 1.9, 'Display': 1.9, 'Social': 1.9}
+
+  # Year-to-year jitter on the shared seasonality signal (`seasonal_index_t`):
+  # without it, every calendar year produces an identical seasonal curve,
+  # which reads as obviously synthetic. `seasonal_peak_jitter_weeks_sd` shifts
+  # each year's peak week by a per-year Normal draw; `seasonal_amplitude_jitter_sd`
+  # scales that year's whole seasonal amplitude by a per-year draw around 1.0.
+  seasonal_peak_jitter_weeks_sd: float = 3.0
+  seasonal_amplitude_jitter_sd: float = 0.15
+
+  # Trend: slow secular drift in execution intensity over the full horizon
+  # (e.g. budget shifting away from linear TV toward social over time),
+  # expressed as total fractional change from the first to the last week.
+  trend_pct_total: dict[str, float] = dataclasses.field(
+      default_factory=lambda: {'TV': -0.15, 'Display': 0.05, 'Social': 0.25}
   )
 
   # Autocorrelation of the additive week-to-week reach noise (an AR(1)
   # process instead of iid draws, since real execution noise persists
-  # across adjacent weeks rather than resetting every week), per channel.
-  # These were tuned against a real client's weekly geo media data: TV is
-  # given the *lowest* phi/highest sd of the three, since real linear-TV
-  # delivery is the choppiest, lowest-autocorrelation channel (week-to-week
-  # spikes, not smooth multi-week blocks); Display is given the *highest*
-  # phi/lowest sd, matching real programmatic-display delivery, which is the
-  # smoothest/most persistent of the observed channels.
-  reach_noise_ar1_phi: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 0.08, 'Display': 0.92, 'Social': 0.3}
-  )
-  time_reach_noise_sd: dict[str, float] = dataclasses.field(
-      default_factory=lambda: {'TV': 0.13, 'Display': 0.01, 'Social': 0.05}
-  )
+  # across adjacent weeks rather than resetting every week).
+  reach_noise_ar1_phi: float = 0.4
   # Degrees of freedom for the AR(1) reach noise's innovation distribution.
   # Student-t rather than Gaussian, so noise is occasionally "jagged" (a few
   # larger week-to-week swings) instead of uniformly smooth -- the scale is
   # rederived in `_simulate_ar1_reach_noise()` so the stationary sd still
   # matches `time_reach_noise_sd` regardless of this value.
   reach_noise_df: float = 4.0
+
+  # Sparse, short-lived one-off execution spikes (a flash promo, a launch
+  # burst, a competitive response) layered on top of the flat multipliers
+  # above -- without them, weekly impressions never show the "why did that
+  # happen" outliers real delivery data has. `promo_spike_prob` is the
+  # per-week probability of a new spike starting on a given channel;
+  # `promo_spike_duration_weeks` is how many weeks it lasts once triggered;
+  # `promo_spike_mult_range` is the multiplier applied to `reach_frac` while
+  # active (independent of `flight_mult`/`seasonal_mult`, so a spike can
+  # occur during an otherwise-dark flighting period too).
+  promo_spike_prob: dict[str, float] = dataclasses.field(
+      default_factory=lambda: {'TV': 0.01, 'Display': 0.03, 'Social': 0.02}
+  )
+  promo_spike_duration_weeks: dict[str, int] = dataclasses.field(
+      default_factory=lambda: {'TV': 1, 'Display': 1, 'Social': 1}
+  )
+  promo_spike_mult_range: tuple[float, float] = (1.4, 2.2)
 
   # Realistic CPM ($ per 1,000 impressions) per channel, +/- a variability
   # band to account for auction/market price fluctuation. TV/Display/Social
@@ -319,18 +295,11 @@ class SimulationConfig:
   # guaranteed every run.
   adstock_retention_range: dict[str, tuple[float, float]] = dataclasses.field(
       default_factory=lambda: {
-          'TV': (0.4, 0.6),
+          'TV': (0.6, 0.8),
           'Display': (0.0, 0.3),
           'Social': (0.1, 0.4),
       }
   )
-  # Adstock truncation window (weeks), shared by the ground-truth transform
-  # below and `model_utils.build_model_spec`'s fitted `ModelSpec` -- both
-  # must agree for a fair "recovered vs. true" comparison. Kept at Meridian's
-  # own default (8) unless overridden; a channel whose true `adstock_
-  # retention_range` sits high enough that an 8-week window truncates a
-  # non-trivial tail of its geometric decay may need a larger value.
-  max_lag: int = 8
 
   # Multiplicative scale applied to the whole non-media baseline term (tau_g
   # + gamma_gc*controls + eps_gt + mu_t) in `generate_kpi_and_revenue()`,
@@ -407,9 +376,35 @@ class GeoMediaDataSimulator:
     config = self.config
     week_of_year = self.time_index.isocalendar().week.to_numpy(dtype=np.float64)
 
+    # Per-year jitter on the peak week and amplitude of the shared
+    # seasonality signal, so successive calendar years don't produce an
+    # identical, obviously-repeating curve (see `seasonal_peak_jitter_weeks_sd`
+    # / `seasonal_amplitude_jitter_sd`).
+    years = self.time_index.year.to_numpy()
+    unique_years, year_idx_t = np.unique(years, return_inverse=True)
+    n_years = len(unique_years)
+    peak_shift_y = (
+        tfp.distributions.Normal(0, config.seasonal_peak_jitter_weeks_sd)
+        .sample(n_years)
+        .numpy()
+    )
+    amplitude_jitter_y = (
+        tfp.distributions.TruncatedNormal(
+            1.0, config.seasonal_amplitude_jitter_sd, 0.5, 1.5
+        )
+        .sample(n_years)
+        .numpy()
+    )
+    peak_shift_t = peak_shift_y[year_idx_t]
+    amplitude_jitter_t = amplitude_jitter_y[year_idx_t]
+
     self.seasonal_index_t = tf.constant(
-        np.cos(
-            2 * np.pi * (week_of_year - config.demand_seasonal_peak_week) / 52.0
+        amplitude_jitter_t
+        * np.cos(
+            2
+            * np.pi
+            * (week_of_year - (config.demand_seasonal_peak_week + peak_shift_t))
+            / 52.0
         ),
         dtype=self.p_g.dtype,
     )
@@ -455,124 +450,124 @@ class GeoMediaDataSimulator:
     )
     return tf.constant(seasonal_mult_tm, dtype=self.p_g.dtype)
 
-  def _sample_renewal_run_lengths(
-      self, mean: float, cv: float, n_draws: int
-  ) -> np.ndarray:
-    """Whole-week run lengths from a Gamma(`mean`, `cv`), floored at 1 week.
+  def _simulate_flighting_multiplier(self) -> tf.Tensor:
+    """On/off campaign flighting via a per-channel two-state Markov chain.
 
-    A low `cv` concentrates run lengths tightly around `mean` (a flight
-    calendar planned in advance); `cv` near 1 approaches the spread of a
-    memoryless (geometric) process.
+    Requires `simulate_controls()` to have run first (it populates
+    `self.seasonal_index_t`): `flight_seasonal_bias` biases the chain's
+    transition probabilities toward that same calendar signal, so bursts
+    tend to cluster around `demand_seasonal_peak_week` every year rather
+    than firing at calendar-blind random points.
     """
-    cv = max(cv, 1e-3)
-    shape = 1.0 / (cv**2)
-    rate = shape / mean
-    draws = (
-        tfp.distributions.Gamma(concentration=shape, rate=rate)
-        .sample(n_draws)
+    config = self.config
+    n_channels = config.n_imp_channels
+    burst_m = np.array(
+        [config.flight_burst_weeks[ch] for ch in config.channel_names],
+        dtype=np.float64,
+    )
+    dark_m = np.array(
+        [config.flight_dark_weeks[ch] for ch in config.channel_names],
+        dtype=np.float64,
+    )
+    floor_m = np.array(
+        [config.flight_floor[ch] for ch in config.channel_names],
+        dtype=np.float64,
+    )
+    bias_m = np.array(
+        [config.flight_seasonal_bias[ch] for ch in config.channel_names],
+        dtype=np.float64,
+    )
+    base_p_on_to_off_m = 1.0 / burst_m
+    base_p_off_to_on_m = 1.0 / dark_m
+
+    # Scale the base transition probabilities by the seasonal index: easier
+    # to turn "on" and harder to turn "off" near the seasonal peak, and vice
+    # versa near the trough. At bias=0 this reduces to the flat, calendar-
+    # blind probabilities used previously.
+    seasonal_index_t = self.seasonal_index_t.numpy()
+    p_off_to_on_tm = np.clip(
+        base_p_off_to_on_m[np.newaxis, :]
+        * (1.0 + bias_m[np.newaxis, :] * seasonal_index_t[:, np.newaxis]),
+        0.0,
+        1.0,
+    )
+    p_on_to_off_tm = np.clip(
+        base_p_on_to_off_m[np.newaxis, :]
+        * (1.0 - bias_m[np.newaxis, :] * seasonal_index_t[:, np.newaxis]),
+        0.0,
+        1.0,
+    )
+
+    transition_draws_tm = (
+        tfp.distributions.Uniform(0, 1)
+        .sample((config.n_times, n_channels))
         .numpy()
     )
-    return np.maximum(1, np.round(draws)).astype(int)
+    state_tm = np.ones((config.n_times, n_channels), dtype=np.float64)
+    for m in range(n_channels):
+      on = True
+      for t in range(config.n_times):
+        state_tm[t, m] = 1.0 if on else 0.0
+        if on and transition_draws_tm[t, m] < p_on_to_off_tm[t, m]:
+          on = False
+        elif not on and transition_draws_tm[t, m] < p_off_to_on_tm[t, m]:
+          on = True
 
-  def _build_renewal_state(
-      self,
-      n_times: int,
-      on_mean: float,
-      on_cv: float,
-      off_mean: float,
-      off_cv: float,
-  ) -> np.ndarray:
-    """An alternating on(1)/off(0) run-length renewal process, `n_times` long."""
-    # Worst case every draw lands at the length-1 floor, so `n_times` draws
-    # per state always covers the full horizon.
-    on_lengths = self._sample_renewal_run_lengths(on_mean, on_cv, n_times)
-    off_lengths = self._sample_renewal_run_lengths(off_mean, off_cv, n_times)
-    segments = []
-    total = 0
-    on = True
-    i_on = i_off = 0
-    while total < n_times:
-      if on:
-        length = on_lengths[i_on]
-        i_on += 1
-        segments.append(np.ones(length))
-      else:
-        length = off_lengths[i_off]
-        i_off += 1
-        segments.append(np.zeros(length))
-      total += length
-      on = not on
-    return np.concatenate(segments)[:n_times]
-
-  def _simulate_flighting_multiplier(self) -> tf.Tensor:
-    """Per-channel execution texture: 'flighting' or 'continuity' (see config).
-
-    Both styles share the same renewal-process mechanism -- alternating runs
-    whose *lengths* are drawn from a Gamma distribution rather than a
-    memoryless geometric one (see `_build_renewal_state`). 'flighting'
-    channels alternate full-strength/`flight_floor` runs sized by
-    `flight_burst_weeks`/`flight_dark_weeks`. 'continuity' channels alternate
-    short `continuity_spike_amplitude` spikes and baseline runs, then
-    renormalize to mean 1 so the texture doesn't shift the channel's overall
-    execution level (matching the other multipliers' mean-~1 convention).
-    """
-    config = self.config
-    mult_tm = np.empty(
-        (config.n_times, config.n_imp_channels), dtype=np.float64
-    )
+    # Smooth the hard 0/1 Markov state into a gradual ramp via a symmetric
+    # triangular kernel, so on/off transitions no longer read as an
+    # instantaneous step (see `flight_ramp_weeks`) -- real campaigns are
+    # trafficked/wound down over a few weeks, not switched on a single one.
+    smoothed_state_tm = np.empty_like(state_tm)
     for m, ch in enumerate(config.channel_names):
-      style = config.flight_style[ch]
-      if style == 'flighting':
-        state_t = self._build_renewal_state(
-            config.n_times,
-            config.flight_burst_weeks[ch],
-            config.flight_burst_cv[ch],
-            config.flight_dark_weeks[ch],
-            config.flight_dark_cv[ch],
-        )
-        floor = config.flight_floor[ch]
-        mult_tm[:, m] = floor + (1.0 - floor) * state_t
-      elif style == 'continuity':
-        state_t = self._build_renewal_state(
-            config.n_times,
-            config.continuity_spike_weeks[ch],
-            config.continuity_spike_cv[ch],
-            config.continuity_gap_weeks[ch],
-            config.continuity_gap_cv[ch],
-        )
-        amplitude = config.continuity_spike_amplitude[ch]
-        raw_t = 1.0 + (amplitude - 1.0) * state_t
-        mult_tm[:, m] = raw_t / raw_t.mean()
-      else:
-        raise ValueError(f'Unknown flight_style {style!r} for channel {ch!r}')
-    return tf.constant(mult_tm, dtype=self.p_g.dtype)
+      ramp = config.flight_ramp_weeks.get(ch, 0)
+      if ramp <= 0:
+        smoothed_state_tm[:, m] = state_tm[:, m]
+        continue
+      kernel = np.concatenate(
+          [np.arange(1, ramp + 2), np.arange(ramp, 0, -1)]
+      ).astype(np.float64)
+      kernel /= kernel.sum()
+      smoothed_state_tm[:, m] = np.convolve(state_tm[:, m], kernel, mode='same')
+
+    flight_mult_tm = (
+        floor_m[np.newaxis, :]
+        + (1.0 - floor_m[np.newaxis, :]) * smoothed_state_tm
+    )
+    return tf.constant(flight_mult_tm, dtype=self.p_g.dtype)
+
+  def _simulate_trend_multiplier(self) -> tf.Tensor:
+    """Slow secular drift in execution intensity, per channel."""
+    config = self.config
+    trend_pct_m = np.array(
+        [config.trend_pct_total[ch] for ch in config.channel_names]
+    )
+    t_frac = np.arange(config.n_times, dtype=np.float64) / max(
+        config.n_times - 1, 1
+    )
+    trend_mult_tm = 1.0 + trend_pct_m[np.newaxis, :] * t_frac[:, np.newaxis]
+    return tf.constant(trend_mult_tm, dtype=self.p_g.dtype)
 
   def _simulate_ar1_reach_noise(self) -> tf.Tensor:
-    """Per-channel AR(1) week-to-week reach noise (replaces iid noise)."""
+    """AR(1) week-to-week reach noise (replaces iid noise)."""
     config = self.config
+    phi = config.reach_noise_ar1_phi
     df = config.reach_noise_df
-    # Student-t has Var = scale^2 * df/(df-2) (df > 2); rescale each
-    # channel's innovation `scale` so its AR(1) process's stationary sd still
-    # equals `time_reach_noise_sd[channel]`, regardless of `df`.
+    # Student-t has Var = scale^2 * df/(df-2) (df > 2); rescale the
+    # innovation's `scale` so the AR(1) process's stationary sd still equals
+    # `time_reach_noise_sd`, regardless of `df`.
     variance_inflation = df / (df - 2)
-    phi_m = np.array(
-        [config.reach_noise_ar1_phi[ch] for ch in config.channel_names]
-    )
-    sd_m = np.array(
-        [config.time_reach_noise_sd[ch] for ch in config.channel_names]
-    )
-    innovation_scale_m = sd_m * np.sqrt(
-        np.maximum(1.0 - phi_m**2, 1e-6) / variance_inflation
+    innovation_scale = float(
+        config.time_reach_noise_sd
+        * np.sqrt(max(1.0 - phi**2, 1e-6) / variance_inflation)
     )
     innovations_tm = tfp.distributions.StudentT(
         df=tf.constant(df, dtype=self.p_g.dtype),
         loc=tf.constant(0, dtype=self.p_g.dtype),
-        scale=tf.constant(innovation_scale_m, dtype=self.p_g.dtype),
-    ).sample(config.n_times)
-    phi_m_t = tf.constant(phi_m, dtype=self.p_g.dtype)
+        scale=tf.constant(innovation_scale, dtype=self.p_g.dtype),
+    ).sample((config.n_times, config.n_imp_channels))
 
     def step(prev_noise_m, innovation_m):
-      return phi_m_t * prev_noise_m + innovation_m
+      return phi * prev_noise_m + innovation_m
 
     return tf.scan(
         step,
@@ -581,6 +576,44 @@ class GeoMediaDataSimulator:
             [config.n_imp_channels], dtype=innovations_tm.dtype
         ),
     )
+
+  def _simulate_promo_spike_multiplier(self) -> tf.Tensor:
+    """Sparse, short-lived one-off execution spikes (promo/launch bursts)."""
+    config = self.config
+    n_channels = config.n_imp_channels
+    prob_m = np.array(
+        [config.promo_spike_prob.get(ch, 0.0) for ch in config.channel_names]
+    )
+    duration_m = np.array(
+        [
+            config.promo_spike_duration_weeks.get(ch, 1)
+            for ch in config.channel_names
+        ]
+    )
+    trigger_draws_tm = (
+        tfp.distributions.Uniform(0, 1)
+        .sample((config.n_times, n_channels))
+        .numpy()
+    )
+    mult_draws_tm = (
+        tfp.distributions.Uniform(*config.promo_spike_mult_range)
+        .sample((config.n_times, n_channels))
+        .numpy()
+    )
+
+    spike_mult_tm = np.ones((config.n_times, n_channels), dtype=np.float64)
+    remaining_m = np.zeros(n_channels, dtype=np.int64)
+    active_mult_m = np.ones(n_channels, dtype=np.float64)
+    for t in range(config.n_times):
+      for m in range(n_channels):
+        if remaining_m[m] <= 0 and trigger_draws_tm[t, m] < prob_m[m]:
+          remaining_m[m] = int(duration_m[m])
+          active_mult_m[m] = mult_draws_tm[t, m]
+        if remaining_m[m] > 0:
+          spike_mult_tm[t, m] = active_mult_m[m]
+          remaining_m[m] -= 1
+
+    return tf.constant(spike_mult_tm, dtype=self.p_g.dtype)
 
   # 3. Media channels (reach x frequency).
   def simulate_media(self, verbose: bool = True) -> tf.Tensor:
@@ -609,19 +642,34 @@ class GeoMediaDataSimulator:
     audience_gtm = self.audience_g_m[:, tf.newaxis, :]
     self.audience_national_m = tf.reduce_sum(self.audience_g_m, axis=0)
 
+    # Reach % (of target audience) per time/channel (no geo dimension --
+    # geo-level heterogeneity lives entirely in the audience size above).
+    if config.enable_ramp:
+      ramp_t = tf.minimum(
+          tf.range(config.n_times, dtype=self.p_g.dtype) / config.ramp_weeks,
+          1.0,
+      )
+    else:
+      ramp_t = tf.ones([config.n_times], dtype=self.p_g.dtype)
+
     # Time-varying execution multipliers layered on top of the flat
-    # `current_reach_frac` target: annual seasonality and on/off flighting,
-    # each independently parameterized per channel (see `SimulationConfig`).
-    # Noise is AR(1) and per-channel rather than iid/global, so week-to-week
-    # execution persists (or doesn't) with a strength tuned per channel.
+    # `current_reach_frac` target: annual seasonality, on/off flighting,
+    # and a secular budget trend, each independently parameterized per
+    # channel (see `SimulationConfig`). Noise is AR(1) rather than iid so
+    # week-to-week execution persists instead of resetting every week.
     self.seasonal_mult_tm = self._simulate_seasonal_multiplier()
     self.flight_mult_tm = self._simulate_flighting_multiplier()
+    self.trend_mult_tm = self._simulate_trend_multiplier()
+    self.promo_spike_mult_tm = self._simulate_promo_spike_multiplier()
     ar1_reach_noise_tm = self._simulate_ar1_reach_noise()
 
     reach_frac_tm = (
         current_reach_frac_m[tf.newaxis, :]
+        * ramp_t[:, tf.newaxis]
         * self.seasonal_mult_tm
         * self.flight_mult_tm
+        * self.trend_mult_tm
+        * self.promo_spike_mult_tm
         + ar1_reach_noise_tm
     )
     self.reach_frac_gtm = tf.clip_by_value(
@@ -629,18 +677,9 @@ class GeoMediaDataSimulator:
     )
 
     # Frequency (impressions per person reached, per week).
-    freq_low_m = tf.constant(
-        [config.frequency_range[ch][0] for ch in config.channel_names],
-        dtype=self.p_g.dtype,
-    )
-    freq_high_m = tf.constant(
-        [config.frequency_range[ch][1] for ch in config.channel_names],
-        dtype=self.p_g.dtype,
-    )
-    self.mean_frequency_m = (freq_low_m + freq_high_m) / 2
     self.frequency_gtm = tf.maximum(
-        tfp.distributions.Uniform(freq_low_m, freq_high_m).sample(
-            (self.n_geos, config.n_times)
+        tfp.distributions.Uniform(*config.frequency_range).sample(
+            (self.n_geos, config.n_times, n_channels)
         )
         + tfp.distributions.Normal(0, config.frequency_noise_sd).sample(
             (self.n_geos, config.n_times, n_channels)
@@ -668,9 +707,9 @@ class GeoMediaDataSimulator:
         print(
             f'{ch}: mean reach % = {realized_reach_frac_m[i]:.3f}'
             f' (nominal target {config.current_reach_frac[ch]} -- seasonality'
-            '/flighting shift the realized average), mean frequency ='
+            ' /flighting/trend shift the realized average), mean frequency ='
             f' {realized_frequency_m[i]:.2f} (target range'
-            f' {config.frequency_range[ch]})'
+            f' {config.frequency_range})'
         )
 
     # Scale impressions (by population and by median of population-scaled
@@ -748,25 +787,18 @@ class GeoMediaDataSimulator:
 
   # 7. Adstock / Hill parameters.
   def simulate_adstock_hill_params(self) -> tf.Tensor:
-    """Derives ec_m from "half of audience at a fixed effective frequency"."""
+    """Derives ec_m from a "half-saturation at 50% of audience" assumption."""
     config = self.config
     half_sat_reach_count_national_m = 0.5 * self.audience_national_m
-    # Convert that reach count to an impression count using a fixed
-    # literature-motivated "effective frequency" (`config.saturation_
-    # frequency`), not each channel's own current `mean_frequency_m`. Using
-    # the channel's own current frequency here would make it cancel out of
-    # `ec_m` entirely (both `ec_impressions` and `median_m` below scale
-    # linearly with it), so a channel's current weekly frequency would never
-    # actually affect how saturated it looks. Anchoring to a fixed threshold
-    # instead decouples `ec_m` from current execution frequency and lets
-    # `frequency_range` genuinely compete against that threshold.
-    saturation_frequency_m = tf.constant(
-        [config.saturation_frequency[ch] for ch in config.channel_names],
-        dtype=self.p_g.dtype,
-    )
-    ec_impressions_national_m = (
-        saturation_frequency_m * half_sat_reach_count_national_m
-    )
+    # Convert that reach count to an impression count using the mean of
+    # `frequency_range`, not a fresh Uniform draw over the same range: weekly
+    # frequency is itself ~Uniform(frequency_range), so its realized average
+    # across geos/times (and hence the `median_m` "current execution" level
+    # below) already converges to that mean. Drawing an independent Uniform
+    # sample here would inject noise into `ec_m` uncorrelated with what
+    # `median_m` is actually built on.
+    mean_frequency = (config.frequency_range[0] + config.frequency_range[1]) / 2
+    ec_impressions_national_m = mean_frequency * half_sat_reach_count_national_m
     ec_per_capita_m = ec_impressions_national_m / self.national_population
     median_m = self.impression_transformer.population_scaled_median_m
 
@@ -791,9 +823,7 @@ class GeoMediaDataSimulator:
         ec=self.ec_m, slope=self.slope_m
     )
     adstock_transformer = adstock_hill.AdstockTransformer(
-        alpha=self.alpha_m,
-        max_lag=self.config.max_lag,
-        n_times_output=self.config.n_times,
+        alpha=self.alpha_m, max_lag=8, n_times_output=self.config.n_times
     )
     self.media_transformed = hill_transformer.forward(
         adstock_transformer.forward(self.transformed_ipc_gtm)
