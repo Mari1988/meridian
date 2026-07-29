@@ -300,15 +300,36 @@ class SimulationConfig:
   )
   cpm_variability_frac: float = 0.05
 
-  # Target incremental ROI per channel, used by `calibrate_channel_effects()`
-  # to rescale `beta_m`/`beta_gm` after media/cost are simulated. Without
-  # this, all channels draw from the same beta_m hyperprior (Section 6) and
-  # end up with an essentially arbitrary relative ROI split. Defaults
-  # reflect TV's high CPM/broad-reach inefficiency vs. digital channels'
-  # lower CPM and tighter targeting.
+  # Baseline target incremental ROI per channel, used by
+  # `calibrate_channel_effects()` to rescale `beta_m`/`beta_gm` after
+  # media/cost are simulated. Without this, all channels draw from the same
+  # beta_m hyperprior (Section 6) and end up with an essentially arbitrary
+  # relative ROI split. Defaults reflect TV's high CPM/broad-reach
+  # inefficiency vs. digital channels' lower CPM and tighter targeting.
+  # `roi_ec_elasticity`/`roi_alpha_elasticity` below further adjust this
+  # baseline by each channel's own curve shape.
   target_roi: dict[str, float] = dataclasses.field(
       default_factory=lambda: {'TV': 2.5, 'Display': 1.5, 'Social': 2.0}
   )
+
+  # A channel's true incremental ROI plausibly isn't independent of its
+  # adstock/saturation shape: a channel that saturates faster (lower ec_m,
+  # often a more narrowly-targeted audience) tends to convert better per
+  # exposure, and a channel with richer/more memorable creative (higher
+  # alpha_m, more retained) tends to persuade more per exposure too --
+  # rather than every channel's ROI being an assumption independent of its
+  # curve shape. `simulate_adstock_hill_params()` adjusts each channel's
+  # `target_roi` baseline above by
+  # `(ec_m / cross-channel geometric mean) ** roi_ec_elasticity *
+  #  (alpha_m / cross-channel geometric mean) ** roi_alpha_elasticity`
+  # before `calibrate_channel_effects()` calibrates to it. `0.0` (the
+  # default for both) is an exact no-op -- multiplier is 1.0 for every
+  # channel -- reproducing the fully independent behavior used elsewhere in
+  # this notebook series. Expected signs: `roi_ec_elasticity` negative
+  # (larger ec_m -> lower ROI), `roi_alpha_elasticity` positive (larger
+  # alpha_m -> higher ROI).
+  roi_ec_elasticity: float = 0.0
+  roi_alpha_elasticity: float = 0.0
 
   # Range each channel's adstock decay rate (`alpha_m`) is drawn uniformly
   # from in `simulate_adstock_hill_params()`, reflecting ad memory persisting
@@ -324,6 +345,34 @@ class SimulationConfig:
           'Social': (0.1, 0.4),
       }
   )
+
+  # Range each channel's Hill `slope_m` (curve-shape exponent -- the same
+  # role as Robyn's `alpha` hyperparameter: https://facebookexperimental.
+  # github.io/Robyn/docs/analysts-guide-to-MMM, not to be confused with
+  # this simulator's own `alpha_m`/adstock retention, which is Robyn's
+  # `theta`) is drawn uniformly from in `simulate_adstock_hill_params()`.
+  # `slope=1` (the default for every channel below) gives Meridian's usual
+  # concave-only Hill curve (`Hill(x)=x/(x+ec)`, maximal marginal value at
+  # `x=0`, monotonically diminishing); `slope>1` gives a genuine S-curve
+  # (near-zero response *and* near-zero marginal value close to `x=0`, a
+  # real "needs a threshold of exposure before eliciting any response"
+  # regime, before marginal value rises, peaks, then decays). `(1.0, 1.0)`
+  # for every channel (the default) is an exact no-op, matching every other
+  # notebook in this series, since Meridian's own default `slope_m` prior
+  # is a hard `Deterministic(1.0)` for plain (non-RF) media channels
+  # (`prior_distribution.py`) -- not just uninformative, but literally
+  # unfittable unless a notebook explicitly overrides it. So a channel
+  # given a true `slope_m != 1` here is one Meridian's default fitted
+  # model is structurally incapable of representing, regardless of prior
+  # informativeness on `ec_m`/`alpha_m`.
+  slope_range: dict[str, tuple[float, float]] = dataclasses.field(
+      default_factory=lambda: {
+          'TV': (1.0, 1.0),
+          'Display': (1.0, 1.0),
+          'Social': (1.0, 1.0),
+      }
+  )
+
   # Adstock truncation window (weeks), shared by the ground-truth transform
   # below and `model_utils.build_model_spec`'s fitted `ModelSpec` -- both
   # must agree for a fair "recovered vs. true" comparison. Kept at Meridian's
@@ -347,6 +396,17 @@ class SimulationConfig:
   # 156 weeks (n_times) from this date lands the last simulated week at
   # 2025-12-29, i.e. data runs through the end of 2025.
   start_date: datetime.date = datetime.date(2023, 1, 9)
+
+  # Number of knots used to generate the true time-varying baseline `mu_t`
+  # in `simulate_intercepts()`. `None` (the default) reproduces the
+  # historical behavior: `n_knots_simul = n_times`, i.e. one independent,
+  # unsmoothed `Normal(0, 2.0)` shock per week. Set this to match (or
+  # deliberately mismatch) `model_utils.build_model_spec`'s fitted `knots`
+  # argument -- e.g. `n_knots_mu_t=8` alongside a fitted model also using
+  # `knots=8` -- to test whether a DGP/model flexibility mismatch in the
+  # baseline spline (as opposed to `ec_m`/`alpha_m`/`eta_m` mis-specification)
+  # is responsible for a channel's `roi_m` not recovering.
+  n_knots_mu_t: int | None = None
 
   def __post_init__(self):
     if len(self.channel_names) != self.n_imp_channels:
@@ -393,6 +453,53 @@ class GeoMediaDataSimulator:
     self.p_g = tf.constant(list(STATE_POPULATION.values()), dtype=tf.float32)
     self.national_population = tf.reduce_sum(self.p_g)
     return self.p_g
+
+  # 1b. Population from real demo data (alternative to Section 1, for use
+  # with `simulate_media_from_real` below).
+  def simulate_population_from_real(self, real_df: pd.DataFrame) -> tf.Tensor:
+    """Sets geo_names/p_g from a real geo x time DataFrame's own population.
+
+    Alternative entry point to `simulate_population()` for notebooks that
+    want the rest of the DGP (controls, coefficients, adstock/Hill `ec_m`
+    derivation, KPI generation) to run over the same real geos/populations
+    that `simulate_media_from_real()` sources its media texture from, rather
+    than the synthetic US-state population table.
+
+    Args:
+      real_df: A geo x time DataFrame with `geo` and `population` columns
+        (one population value per geo, e.g. the demo's `geo_media_rf.csv`).
+    """
+    geo_pop = real_df.drop_duplicates('geo').set_index('geo')['population']
+    self.geo_names = sorted(geo_pop.index)
+    self.n_geos = len(self.geo_names)
+    self.p_g = tf.constant(
+        [geo_pop[g] for g in self.geo_names], dtype=tf.float32
+    )
+    self.national_population = tf.reduce_sum(self.p_g)
+    return self.p_g
+
+  def align_time_index_to_real(self, real_df: pd.DataFrame) -> None:
+    """Overrides the config-derived time index with the real data's own dates.
+
+    Must be called (after `simulate_population_from_real`) before
+    `simulate_controls`/`simulate_media_from_real`, so every downstream
+    tensor is indexed by the real demo dataset's actual calendar weeks
+    instead of `config.start_date`. `config.n_times` must already match the
+    real data's week count -- this only aligns the calendar dates, not the
+    tensor lengths.
+
+    Args:
+      real_df: A geo x time DataFrame with a `time` column of week-start
+        dates (any format `pd.to_datetime` accepts).
+    """
+    real_times = sorted(pd.to_datetime(real_df['time'].unique()))
+    if len(real_times) != self.config.n_times:
+      raise ValueError(
+          f'Real data has {len(real_times)} weeks but config.n_times ='
+          f' {self.config.n_times} -- set n_times to match the real data.'
+      )
+    self.time_index = pd.DatetimeIndex(real_times)
+    self.time_names = [d.strftime('%Y-%m-%d') for d in real_times]
 
   # 2. Controls.
   def simulate_controls(self) -> tf.Tensor:
@@ -683,12 +790,204 @@ class GeoMediaDataSimulator:
     )
     return self.impression_gtm
 
+  def _pivot_real_column(self, real_df: pd.DataFrame, col: str) -> np.ndarray:
+    """Pivots a real-data column to a `(n_geos, n_times)` array, ordered to
+    match `self.geo_names`/`self.time_names` (set by
+    `simulate_population_from_real`/`align_time_index_to_real`)."""
+    real_df = real_df.copy()
+    real_df['time'] = pd.to_datetime(real_df['time']).dt.strftime('%Y-%m-%d')
+    pivot = real_df.pivot(index='geo', columns='time', values=col)
+    pivot = pivot.reindex(index=self.geo_names, columns=self.time_names)
+    return pivot.to_numpy(dtype=np.float64)
+
+  # 3b. Media from real demo data (alternative to Section 3).
+  def simulate_media_from_real(
+      self,
+      real_df: pd.DataFrame,
+      rf_source_map: dict[str, str],
+      plain_source_map: dict[str, str],
+      verbose: bool = True,
+  ) -> tf.Tensor:
+    """Builds media the same way `simulate_media()` does, but sources each
+    channel's real-world execution *texture* (its actual geo x time
+    reach/frequency, or impression, noise/variation) from a real dataset
+    instead of synthetic seasonality/flighting/AR(1) generation --
+    normalized per geo to a mean of 1 and rescaled to this channel's
+    `config`-assumed `current_reach_frac`/`frequency_range` target, exactly
+    as the synthetic version would target on average. Everything else
+    (target audience per geo, adstock/Hill `ec_m` derivation, KPI
+    generation) is unaffected, so the DGP's known ground truth still holds.
+
+    Must be called after `simulate_population_from_real` and
+    `align_time_index_to_real` (so `self.geo_names`/`self.time_names` match
+    `real_df`).
+
+    Args:
+      real_df: A geo x time DataFrame with real reach/frequency/impression
+        columns (e.g. the demo's `geo_media_rf.csv`), following that
+        dataset's `<Channel>_reach`/`<Channel>_frequency`/`<Channel>_
+        impression` naming convention.
+      rf_source_map: `{config_channel_name: real_channel_prefix}` for
+        channels backed by a real `(reach, frequency)` pair -- e.g.
+        `{'TV': 'Channel3', 'Social': 'Channel3'}` reuses the same real
+        reach/frequency series (independently rescaled per target channel).
+      plain_source_map: `{config_channel_name: real_channel_prefix}` for
+        channels backed by only a real impression column (no real
+        reach/frequency split available) -- e.g. `{'Display': 'Channel0'}`.
+        Reach/frequency for these channels are back-derived placeholders
+        (`frequency = mean_frequency_m`, `reach_count = impressions /
+        frequency`) purely so `to_dataframe()`'s output columns stay
+        populated; they carry no independent real-data information.
+      verbose: Whether to print sparsity/reach/frequency diagnostics,
+        matching `simulate_media()`'s verbose block.
+
+    Returns:
+      `self.impression_gtm`.
+    """
+    config = self.config
+    covered = set(rf_source_map) | set(plain_source_map)
+    if covered != set(config.channel_names):
+      raise ValueError(
+          'rf_source_map/plain_source_map together must cover exactly'
+          f' {config.channel_names}, got {sorted(covered)}'
+      )
+
+    target_audience_pop_frac_m = tf.constant(
+        [config.target_audience_pop_frac[ch] for ch in config.channel_names],
+        dtype=self.p_g.dtype,
+    )
+    freq_low_m = tf.constant(
+        [config.frequency_range[ch][0] for ch in config.channel_names],
+        dtype=self.p_g.dtype,
+    )
+    freq_high_m = tf.constant(
+        [config.frequency_range[ch][1] for ch in config.channel_names],
+        dtype=self.p_g.dtype,
+    )
+    self.mean_frequency_m = (freq_low_m + freq_high_m) / 2
+
+    # Target-audience size per geo -- identical mechanism to
+    # `simulate_media()`, just driven by the real per-geo population set by
+    # `simulate_population_from_real`.
+    geo_audience_mult_gm = tfp.distributions.TruncatedNormal(
+        1.0, config.geo_audience_heterogeneity_sd, 0.5, 1.5
+    ).sample((self.n_geos, config.n_imp_channels))
+    self.audience_g_m = (
+        self.p_g[:, tf.newaxis]
+        * target_audience_pop_frac_m[tf.newaxis, :]
+        * geo_audience_mult_gm
+    )
+    audience_gm = self.audience_g_m.numpy()
+    self.audience_national_m = tf.reduce_sum(self.audience_g_m, axis=0)
+
+    reach_frac_gtm = np.zeros(
+        (self.n_geos, config.n_times, config.n_imp_channels)
+    )
+    frequency_gtm = np.zeros(
+        (self.n_geos, config.n_times, config.n_imp_channels)
+    )
+    impression_gtm = np.zeros(
+        (self.n_geos, config.n_times, config.n_imp_channels)
+    )
+
+    for ch_idx, ch in enumerate(config.channel_names):
+      target_reach_frac = config.current_reach_frac[ch]
+      target_freq = self.mean_frequency_m.numpy()[ch_idx]
+      if ch in rf_source_map:
+        prefix = rf_source_map[ch]
+        reach_raw_gt = self._pivot_real_column(
+            real_df, _add_suffix(prefix, REACH_COL_SUFFIX)
+        )
+        freq_raw_gt = self._pivot_real_column(
+            real_df, _add_suffix(prefix, FREQUENCY_COL_SUFFIX)
+        )
+        # Per-geo normalization to mean 1 -- preserves each geo's own real
+        # relative geo x time variation (noise, autocorrelation, ramp-up
+        # zeros) while the target level below sets the overall scale.
+        reach_shape_gt = reach_raw_gt / np.maximum(
+            reach_raw_gt.mean(axis=1, keepdims=True), 1e-9
+        )
+        freq_shape_gt = freq_raw_gt / np.maximum(
+            freq_raw_gt.mean(axis=1, keepdims=True), 1e-9
+        )
+        reach_frac_ch_gt = np.clip(
+            target_reach_frac * reach_shape_gt, 0.0, 0.98
+        )
+        frequency_ch_gt = np.maximum(target_freq * freq_shape_gt, 0.5)
+        reach_count_ch_gt = (
+            reach_frac_ch_gt * audience_gm[:, ch_idx : ch_idx + 1]
+        )
+        impression_ch_gt = np.round(reach_count_ch_gt * frequency_ch_gt)
+      else:
+        prefix = plain_source_map[ch]
+        impr_raw_gt = self._pivot_real_column(
+            real_df, _add_suffix(prefix, IMPRESSIONS_COL_SUFFIX)
+        )
+        impr_shape_gt = impr_raw_gt / np.maximum(
+            impr_raw_gt.mean(axis=1, keepdims=True), 1e-9
+        )
+        target_level_g = (
+            audience_gm[:, ch_idx] * target_reach_frac * target_freq
+        )
+        impression_ch_gt = np.round(
+            target_level_g[:, np.newaxis] * impr_shape_gt
+        )
+        # No real reach/frequency split exists for a plain-impression source
+        # channel -- back-derive placeholders at a constant frequency purely
+        # so `to_dataframe()` stays populated (see docstring).
+        frequency_ch_gt = np.full_like(impression_ch_gt, target_freq)
+        reach_count_ch_gt = impression_ch_gt / target_freq
+        reach_frac_ch_gt = (
+            reach_count_ch_gt / audience_gm[:, ch_idx : ch_idx + 1]
+        )
+
+      reach_frac_gtm[:, :, ch_idx] = reach_frac_ch_gt
+      frequency_gtm[:, :, ch_idx] = frequency_ch_gt
+      impression_gtm[:, :, ch_idx] = impression_ch_gt
+
+    self.reach_frac_gtm = tf.constant(reach_frac_gtm, dtype=self.p_g.dtype)
+    self.frequency_gtm = tf.constant(frequency_gtm, dtype=self.p_g.dtype)
+    self.reach_count_gtm = (
+        self.reach_frac_gtm * self.audience_g_m[:, tf.newaxis, :]
+    )
+    self.impression_gtm = tf.constant(impression_gtm, dtype=self.p_g.dtype)
+
+    if verbose:
+      ipc_sparsity = np.sum(self.impression_gtm.numpy() == 0.0, axis=(0, 1)) / (
+          self.n_geos * config.n_times
+      )
+      print(
+          'percentage of sparsity of impression_gtm for each channel:'
+          f' {[f"{s * 100:.2f}%" for s in ipc_sparsity]}'
+      )
+      realized_reach_frac_m = tf.reduce_mean(
+          self.reach_count_gtm, axis=(0, 1)
+      ) / tf.reduce_mean(self.audience_g_m, axis=0)
+      realized_frequency_m = tf.reduce_mean(self.frequency_gtm, axis=(0, 1))
+      for i, ch in enumerate(config.channel_names):
+        source = rf_source_map.get(ch) or plain_source_map.get(ch)
+        print(
+            f'{ch} (from real {source}): mean reach % ='
+            f' {realized_reach_frac_m[i]:.3f} (target'
+            f' {config.current_reach_frac[ch]}), mean frequency ='
+            f' {realized_frequency_m[i]:.2f} (target range'
+            f' {config.frequency_range[ch]})'
+        )
+
+    self.impression_transformer = transformers.MediaTransformer(
+        media=self.impression_gtm, population=self.p_g
+    )
+    self.transformed_ipc_gtm = self.impression_transformer.forward(
+        self.impression_gtm
+    )
+    return self.impression_gtm
+
   # 4. Time-varying intercepts (mu_t) and geo effects (tau_g).
   def simulate_intercepts(self) -> tf.Tensor:
     """Simulates the time-varying intercept and geo-effect terms."""
     config = self.config
     self.tau_g = tfp.distributions.Normal(15.0, 1.2).sample(self.n_geos)
-    n_knots_simul = config.n_times
+    n_knots_simul = config.n_knots_mu_t or config.n_times
     knots_k = tfp.distributions.Normal(0, 2.0).sample(n_knots_simul)
     knots_object = knots.get_knot_info(config.n_times, n_knots_simul, False)
     self.mu_t = tfp.distributions.Deterministic(
@@ -748,7 +1047,10 @@ class GeoMediaDataSimulator:
 
   # 7. Adstock / Hill parameters.
   def simulate_adstock_hill_params(self) -> tf.Tensor:
-    """Derives ec_m from "half of audience at a fixed effective frequency"."""
+    """Derives ec_m from "half of audience at a fixed effective frequency",
+    and adjusts `target_roi` by each channel's own resulting `ec_m`/`alpha_m`
+    (see `roi_ec_elasticity`/`roi_alpha_elasticity` on `SimulationConfig`).
+    """
     config = self.config
     half_sat_reach_count_national_m = 0.5 * self.audience_national_m
     # Convert that reach count to an impression count using a fixed
@@ -780,8 +1082,30 @@ class GeoMediaDataSimulator:
     )
     self.alpha_m = tfp.distributions.Uniform(alpha_low_m, alpha_high_m).sample()
     self.ec_m = ec_per_capita_m / median_m
-    self.slope_m = tf.ones([config.n_imp_channels])
+
+    slope_low_m = tf.constant(
+        [config.slope_range[ch][0] for ch in config.channel_names],
+        dtype=self.p_g.dtype,
+    )
+    slope_high_m = tf.constant(
+        [config.slope_range[ch][1] for ch in config.channel_names],
+        dtype=self.p_g.dtype,
+    )
+    self.slope_m = tfp.distributions.Uniform(slope_low_m, slope_high_m).sample()
     print(f'ec_m = {self.ec_m.numpy()}')
+
+    target_roi_base_m = tf.constant(
+        [config.target_roi[ch] for ch in config.channel_names],
+        dtype=self.p_g.dtype,
+    )
+    ec_m_gmean = tf.exp(tf.reduce_mean(tf.math.log(self.ec_m)))
+    alpha_m_gmean = tf.exp(tf.reduce_mean(tf.math.log(self.alpha_m)))
+    roi_shape_multiplier_m = (
+        self.ec_m / ec_m_gmean
+    ) ** config.roi_ec_elasticity * (
+        self.alpha_m / alpha_m_gmean
+    ) ** config.roi_alpha_elasticity
+    self.target_roi_m = target_roi_base_m * roi_shape_multiplier_m
     return self.ec_m
 
   # 8. Transform the media.
@@ -802,23 +1126,20 @@ class GeoMediaDataSimulator:
 
   # 8b. Calibrate channel effect sizes to hit realistic target ROIs.
   def calibrate_channel_effects(self) -> tf.Tensor:
-    """Rescales beta_m/beta_gm so realized ROI matches `config.target_roi`.
+    """Rescales beta_m/beta_gm so realized ROI matches `self.target_roi_m`
+    (the shape-adjusted target computed in `simulate_adstock_hill_params()`).
 
-    Must run after `transform_media()` and `simulate_cost_and_unit_value()`,
-    and before `generate_kpi_and_revenue()`. `beta_m` is drawn from an
-    identical hyperprior across channels (Section 6), so without this step
-    each channel's relative contribution/ROI is essentially arbitrary --
-    this reverse-engineers the scale the same way `ec_m` is already
+    Must run after `simulate_adstock_hill_params()`, `transform_media()`,
+    and `simulate_cost_and_unit_value()`, and before
+    `generate_kpi_and_revenue()`. `beta_m` is drawn from an identical
+    hyperprior across channels (Section 6), so without this step each
+    channel's relative contribution/ROI is essentially arbitrary -- this
+    reverse-engineers the scale the same way `ec_m` is already
     reverse-engineered from a "50% of audience" assumption (Section 7).
     Incremental revenue is linear in `beta_gm` (media/cost/unit-value are
     already fixed at this point), so a single rescale hits the target
     exactly, in expectation over the geo-level `beta_gm` heterogeneity.
     """
-    config = self.config
-    target_roi_m = tf.constant(
-        [config.target_roi[ch] for ch in config.channel_names],
-        dtype=self.p_g.dtype,
-    )
     current_incremental_revenue_m = tf.einsum(
         'g,gt,gtm,gm->m',
         self.p_g,
@@ -827,7 +1148,9 @@ class GeoMediaDataSimulator:
         self.beta_gm,
     )
     current_cost_m = tf.einsum('gtm->m', self.cost_gtm)
-    scale_m = (target_roi_m * current_cost_m) / current_incremental_revenue_m
+    scale_m = (
+        self.target_roi_m * current_cost_m
+    ) / current_incremental_revenue_m
 
     self.beta_m = self.beta_m + tf.math.log(scale_m)
     self.beta_gm = self.beta_gm * scale_m
@@ -849,7 +1172,12 @@ class GeoMediaDataSimulator:
         0.0,
     ) + tf.einsum('gtm,gm->gt', self.media_transformed, self.beta_gm)
     self.kpi_gt = kpi_per_capita_gt * self.p_g[..., tf.newaxis]
-    self.revenue_gt = self.kpi_gt * tf.ones_like(self.unit_value)
+    # Revenue is KPI valued at `unit_value` (~0.035), matching the units
+    # `compute_ground_truth`'s `incremental_revenue_m` is computed in. An
+    # earlier `tf.ones_like(self.unit_value)` here left `revenue_gt` equal to
+    # `kpi_gt`, so any media-contribution share taken as
+    # `incremental_revenue_m / revenue_gt` came out ~1/unit_value too small.
+    self.revenue_gt = self.kpi_gt * self.unit_value
     return self.kpi_gt
 
   # 10. Combine tensors into a Pandas DataFrame.

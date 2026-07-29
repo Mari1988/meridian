@@ -33,3 +33,6 @@ proto/mmm/**/*_pb2.py
 
 # virtualenv
 .venv/
+
+# Fitted model artifacts from synthetic prior-recovery runs (large binaries).
+demo/synthetic/fitted_models/

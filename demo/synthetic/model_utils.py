@@ -5,12 +5,14 @@ ArviZ posterior summary table by parameter name, constructing `ec_m` prior
 variants for the prior-recovery case studies, and Hill-curve diagnostics.
 """
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import tensorflow_probability as tfp
 
 from meridian import constants
+from meridian.analysis import analyzer
 from meridian.data import data_frame_input_data_builder
 from meridian.data import input_data as input_data_lib
 from meridian.model import adstock_hill
@@ -52,6 +54,111 @@ def filter_param_summary(
   if suffix is not None:
     cond &= summary_df['index'].str.endswith(suffix)
   return summary_df.loc[cond, :]
+
+
+def roi_posterior_summary(
+    mmm, channel_names: list[str], hdi_prob: float = 0.9
+) -> pd.DataFrame:
+  """ArviZ-style posterior summary for `roi_m`, computed post-hoc.
+
+  Under `media_prior_type='roi'` (or `'mroi'`/`'contribution'`), `roi_m` is
+  sampled directly and lands in `mmm.inference_data.posterior` already, so
+  `az.summary(mmm.inference_data, ...)` picks it up on its own. Under
+  `'coefficient'`, `beta_m` is the free sampled parameter instead and `roi_m`
+  is never added to `inference_data` -- it has to be recomputed from the
+  fitted `beta_gm`/`ec_m`/`alpha_m`/spend via `analyzer.Analyzer.roi()`. This
+  wraps that computation into the same `az.summary`-shaped table (`index`,
+  `mean`, `sd`, `hdi_{lo}%`, `hdi_{hi}%`, `mcse_mean`, `mcse_sd`, `ess_bulk`,
+  `ess_tail`, `r_hat`) so it's a drop-in replacement for
+  `filter_param_summary(summary, 'roi_m')` regardless of `media_prior_type`.
+
+  Args:
+    mmm: A fitted `Meridian` model (posterior sampled).
+    channel_names: Media channel names, in the same order as the model's
+      media channel dimension.
+    hdi_prob: HDI probability mass, matching the rest of the notebook's
+      `az.summary` calls.
+
+  Returns:
+    A summary DataFrame with one row per channel.
+  """
+  roi_draws = analyzer.Analyzer(mmm).roi().numpy()  # (chains, draws, channels)
+  idata = az.from_dict(
+      posterior={'roi_m': roi_draws},
+      dims={'roi_m': ['channel']},
+      coords={'channel': channel_names},
+  )
+  return az.summary(idata, extend=True, hdi_prob=hdi_prob).reset_index()
+
+
+def build_comparison_table(
+    fitted_mmms: dict,
+    config,
+    sim,
+    ground_truth: dict,
+    hdi_prob: float = 0.95,
+) -> pd.DataFrame:
+  """One row per (channel, param), one column per fitted variant.
+
+  Each cell is `"mean (hdi_lo-hdi_hi) mark"`, where `mark` is a check mark
+  if the true value falls inside that variant's HDI at `hdi_prob`, else a
+  cross mark. `roi_m` uses `roi_posterior_summary` (post-hoc, works
+  regardless of `media_prior_type`); `alpha_m`/`ec_m` use `az.summary`
+  directly since they're always native posterior variables.
+
+  Args:
+    fitted_mmms: `{variant_name: fitted Meridian model}`.
+    config: The `SimulationConfig` used to build every model in `fitted_mmms`
+      (must share the same `channel_names`).
+    sim: The simulated `GeoMediaDataSimulator` used to build `config`'s data
+      (source of true `alpha_m`/`ec_m`).
+    ground_truth: `sim.compute_ground_truth()`'s output (source of true
+      `roi_m`).
+    hdi_prob: HDI probability mass.
+
+  Returns:
+    A wide comparison `DataFrame`.
+  """
+  true_vals = {
+      'alpha_m': dict(zip(config.channel_names, sim.alpha_m.numpy())),
+      'ec_m': dict(zip(config.channel_names, sim.ec_m.numpy())),
+      'roi_m': dict(zip(config.channel_names, ground_truth['roi_m'])),
+  }
+  variant_summaries = {}
+  for variant, mmm in fitted_mmms.items():
+    az_summary = az.summary(
+        mmm.inference_data, extend=True, hdi_prob=hdi_prob
+    ).reset_index()
+    variant_summaries[variant] = {
+        'alpha_m': az_summary,
+        'ec_m': az_summary,
+        'roi_m': roi_posterior_summary(
+            mmm, config.channel_names, hdi_prob=hdi_prob
+        ),
+    }
+
+  rows = []
+  for channel in config.channel_names:
+    for param in ['alpha_m', 'ec_m', 'roi_m']:
+      true_val = true_vals[param][channel]
+      row = {
+          'channel': channel,
+          'param': param,
+          'true': round(float(true_val), 3),
+      }
+      for variant in fitted_mmms:
+        summary = variant_summaries[variant][param]
+        hdi_cols = sorted(c for c in summary.columns if c.startswith('hdi_'))
+        lo_col, hi_col = hdi_cols[0], hdi_cols[1]
+        record = summary.loc[summary['index'] == f'{param}[{channel}]'].iloc[0]
+        passed = record[lo_col] <= true_val <= record[hi_col]
+        mark = '✓' if passed else '✗'
+        row[variant] = (
+            f"{record['mean']:.3f} ({record[lo_col]:.2f}-{record[hi_col]:.2f})"
+            f' {mark}'
+        )
+      rows.append(row)
+  return pd.DataFrame(rows)
 
 
 def build_reach_based_ec_prior(
@@ -150,6 +257,83 @@ def build_alpha_prior(
   )
 
 
+def build_slope_prior(
+    sim, config, base_scale: float = 0.1
+) -> tfp.distributions.Distribution:
+  """LogNormal `slope_m` prior centered on the ground-truth `sim.slope_m`.
+
+  `slope_m` is Meridian's Hill curve-shape exponent -- the same role as
+  Robyn's `alpha` hyperparameter (see `SimulationConfig.slope_range` in
+  `data_simulator.py`; not to be confused with this simulator's own
+  `alpha_m`/adstock retention, which is Robyn's `theta`). Meridian's own
+  default `slope_m` prior is a hard `Deterministic(1.0)` for plain media
+  channels -- not just uninformative, but literally unfittable -- so using
+  this prior means a notebook is explicitly opting into estimating it,
+  anchored on an advertiser's planning assumption about each channel's
+  response-curve shape (e.g. TV needing a real frequency threshold before
+  eliciting response, vs. digital's more immediate, concave response).
+  Analogous to `build_reach_based_ec_prior` for `ec_m`.
+
+  Args:
+    sim: A simulated `GeoMediaDataSimulator` (post `simulate_adstock_hill_
+      params()`).
+    config: The `SimulationConfig` used to build `sim`.
+    base_scale: Log-scale standard deviation around each channel's true
+      `slope_m`.
+
+  Returns:
+    A batched `LogNormal` distribution over `slope_m`.
+  """
+  assumed_slope_m = sim.slope_m.numpy()
+  return tfp.distributions.LogNormal(
+      loc=[float(x) for x in np.log(assumed_slope_m)],
+      scale=[base_scale] * config.n_imp_channels,
+      name=constants.SLOPE_M,
+  )
+
+
+def build_eta_prior(
+    sim, config, base_scale: float = 0.03
+) -> tfp.distributions.Distribution:
+  """TruncatedNormal `eta_m` prior centered on the ground-truth `sim.eta_m`.
+
+  `eta_m` governs the hierarchical spread of geo-level media effects
+  (`beta_gm = exp(beta_m + eta_m * dev_g)` under `media_effects_dist=
+  'log_normal'`). Unlike `ec_m`/`alpha_m`, none of the `PRIOR_VARIANTS` above
+  inform it -- under `media_prior_type='coefficient'` it's left at
+  Meridian's generic default `HalfNormal(1.0)`, uninformed by anything about
+  the true DGP. Because `exp` is convex, an overestimated `eta_m` doesn't
+  just widen geo-level uncertainty symmetrically -- it multiplicatively
+  inflates the population-weighted *average* effect (and hence the derived
+  `roi_m`), since a few geos with large positive `dev_g` draws end up with
+  disproportionately large `beta_gm` that dominate the population-weighted
+  sum. This lets us test whether that specific failure mode (observed for
+  `'coefficient'`'s Display fit: fitted `eta_m` ~4.0 vs a true value of
+  ~0.165, well-converged) is fixable the same way `ec_m`/`alpha_m` are, by
+  anchoring the prior on the true simulated value.
+
+  Args:
+    sim: A simulated `GeoMediaDataSimulator` (post `simulate_coefficients()`,
+      which sets `sim.eta_m`).
+    config: The `SimulationConfig` used to build `sim`.
+    base_scale: Standard deviation of the truncated normal around each
+      channel's true `eta_m`.
+
+  Returns:
+    A batched `TruncatedNormal` distribution over `eta_m`, bounded to
+    `[0, 10]` (`eta_m` has no natural upper bound the way `alpha_m` does).
+  """
+  assumed_eta_m = sim.eta_m.numpy()
+  scales = [base_scale] * config.n_imp_channels
+  return tfp.distributions.TruncatedNormal(
+      loc=[float(x) for x in assumed_eta_m],
+      scale=scales,
+      low=0.0,
+      high=10.0,
+      name=constants.ETA_M,
+  )
+
+
 # Category/channel adstock-decay benchmark ranges for `ec_alpha_range` --
 # deliberately *not* read from `sim.alpha_m`, unlike `build_alpha_prior`.
 # These represent what a practitioner might plausibly believe from general
@@ -243,18 +427,106 @@ PRIOR_VARIANTS = {
             alpha_m=build_alpha_range_prior(config),
         )
     ),
+    # Pressure test for the `eta_m`-driven `roi_m` blow-up observed under
+    # `media_prior_type='coefficient'` (Display's fitted `eta_m` ~4.0 vs
+    # true ~0.165): adds a tight, truth-centered `eta_m` prior on top of
+    # `ec_alpha_social_tight`'s tight `ec_m`/`alpha_m` priors, to see whether
+    # informing all three shape/dispersion parameters is enough to pull
+    # `roi_m` inside its 90% HDI of the true value.
+    'ec_alpha_eta_tight': (
+        lambda sim, config, rng=None: prior_distribution.PriorDistribution(
+            ec_m=build_reach_based_ec_prior(sim, config),
+            alpha_m=build_alpha_prior(
+                sim,
+                config,
+                base_scale={'TV': 0.03, 'Display': 0.03, 'Social': 0.03},
+            ),
+            eta_m=build_eta_prior(sim, config, base_scale=0.03),
+        )
+    ),
+    # `ec_alpha_social_tight` only tightens `alpha_m` (scale 0.1 -> 0.03,
+    # all channels despite the name) -- `ec_m` there is still at
+    # `build_reach_based_ec_prior`'s looser default `base_scale=0.1`. This
+    # variant tightens `ec_m` to the same 0.03 scale too, for all channels,
+    # to see whether matching `ec_m`'s informativeness to `alpha_m`'s
+    # improves on `ec_alpha_social_tight`'s AKS/unmatched-DGP recovery
+    # (7/9 cells inside their 95% HDI, notably still missing TV's `alpha_m`).
+    'ec_alpha_both_tight': (
+        lambda sim, config, rng=None: prior_distribution.PriorDistribution(
+            ec_m=build_reach_based_ec_prior(sim, config, base_scale=0.03),
+            alpha_m=build_alpha_prior(
+                sim,
+                config,
+                base_scale={'TV': 0.03, 'Display': 0.03, 'Social': 0.03},
+            ),
+        )
+    ),
+    # Extends `ec_alpha_only` with an informed `slope_m` prior, for DGPs
+    # built with a non-default `SimulationConfig.slope_range` (Meridian's
+    # own default `slope_m` prior is a hard `Deterministic(1.0)`, so this
+    # is the only variant that lets the fitted model represent anything but
+    # a concave Hill curve). Tests whether recovering the extra shape
+    # parameter is what it takes to fix `ec_m`/`roi_m` recovery once the
+    # true curve is a genuine S-curve, not just informing `ec_m`/`alpha_m`
+    # under a fixed-at-1 `slope_m` assumption.
+    'ec_alpha_slope_only': (
+        lambda sim, config, rng=None: prior_distribution.PriorDistribution(
+            ec_m=build_reach_based_ec_prior(sim, config),
+            alpha_m=build_alpha_prior(sim, config),
+            slope_m=build_slope_prior(sim, config),
+        )
+    ),
 }
 
 
-def build_model_spec(variant: str, sim, config, rng=None) -> spec.ModelSpec:
-  """Builds a `ModelSpec` for one of `PRIOR_VARIANTS`'s keys."""
+def build_model_spec(
+    variant: str,
+    sim,
+    config,
+    rng=None,
+    media_prior_type: str = 'roi',
+    knots: int | None = 8,
+    enable_aks: bool = False,
+) -> spec.ModelSpec:
+  """Builds a `ModelSpec` for one of `PRIOR_VARIANTS`'s keys.
+
+  Args:
+    variant: A key into `PRIOR_VARIANTS`.
+    sim: A simulated `GeoMediaDataSimulator` (post `simulate_adstock_hill_
+      params()`).
+    config: The `SimulationConfig` used to build `sim`.
+    rng: Passed through to the `PRIOR_VARIANTS` builder (only used by
+      `ec_noisy`).
+    media_prior_type: `ModelSpec.media_prior_type` -- `'roi'` (the default)
+      samples `roi_m` directly and derives `beta_m` from it, `ec_m`,
+      `alpha_m`, and `slope_m`; `'coefficient'` samples `beta_m` directly
+      (default prior `HalfNormal(5.0)`) with no such dependency on the
+      Hill/adstock shape parameters. `ec_m`/`alpha_m` prior variants above are
+      unaffected by this choice either way.
+    knots: `ModelSpec.knots` for the time-effects spline. Default `8` is a
+      heavily smoothed fit, *not* Meridian's own default. The DGP's own
+      time-varying baseline (`mu_t` in `data_simulator.py`) uses
+      `n_knots_simul = config.n_times` -- i.e. one independent, unsmoothed
+      `Normal(0, 2.0)` shock per week -- so `8` is a large flexibility
+      mismatch against the true generating process. `None` reproduces
+      Meridian's actual default (one knot per time period, per
+      `spec.ModelSpec`'s own docstring) -- maximum flexibility, matching the
+      DGP's mismatch structurally without needing to alter the DGP itself.
+      Ignored (must be left at `None`) when `enable_aks=True`.
+    enable_aks: `ModelSpec.enable_aks` -- use Meridian's Automatic Knot
+      Selection instead of a fixed `knots` count. Mutually exclusive with
+      `knots` (Meridian requires `knots=None` when this is `True`).
+  """
   prior = PRIOR_VARIANTS[variant](sim, config, rng)
   kwargs = dict(
-      media_prior_type='roi',
+      media_prior_type=media_prior_type,
       media_effects_dist='log_normal',
-      knots=8,
       max_lag=config.max_lag,
   )
+  if enable_aks:
+    kwargs['enable_aks'] = True
+  else:
+    kwargs['knots'] = knots
   if prior is not None:
     kwargs['prior'] = prior
   return spec.ModelSpec(**kwargs)
@@ -312,6 +584,59 @@ def build_simulated_input(config):
   sim.simulate_population()
   sim.simulate_controls()
   sim.simulate_media(verbose=False)
+  sim.simulate_cost_and_unit_value()
+  sim.simulate_intercepts()
+  sim.simulate_coefficients()
+  sim.simulate_adstock_hill_params()
+  sim.transform_media()
+  sim.calibrate_channel_effects()
+  sim.generate_kpi_and_revenue()
+  df = sim.to_dataframe()
+  ground_truth = sim.compute_ground_truth(verbose=False)
+  data = build_input_data(df, config.channel_names, sim.control_col_names)
+  return sim, data, ground_truth
+
+
+def build_real_augmented_input(
+    config,
+    real_df: pd.DataFrame,
+    rf_source_map: dict[str, str],
+    plain_source_map: dict[str, str],
+):
+  """Runs the simulator pipeline with real-data-sourced, rescaled media.
+
+  Identical to `build_simulated_input` except Section 1 (population) and
+  Section 3 (media) are replaced by `simulate_population_from_real`/
+  `align_time_index_to_real`/`simulate_media_from_real`: real per-geo
+  population/dates and each channel's actual real-data reach/frequency (or
+  impression) geo x time texture, rescaled to `config`'s assumed
+  `current_reach_frac`/`frequency_range` target per channel. Every other
+  step (controls, coefficients, adstock/Hill `ec_m` derivation, ROI
+  calibration, KPI generation) is unchanged, so the same known-ground-truth
+  recovery check used by `build_simulated_input` still applies.
+
+  Args:
+    config: The `SimulationConfig` to build the scenario from.
+    real_df: A geo x time DataFrame with real population/reach/frequency/
+      impression columns (e.g. the demo's `geo_media_rf.csv`), following
+      that dataset's `<Channel>_reach`/`<Channel>_frequency`/`<Channel>_
+      impression` naming convention. Its week count must match
+      `config.n_times`.
+    rf_source_map: `{config_channel_name: real_channel_prefix}` for channels
+      backed by a real `(reach, frequency)` pair.
+    plain_source_map: `{config_channel_name: real_channel_prefix}` for
+      channels backed by only a real impression column.
+
+  Returns:
+    `(sim, data, ground_truth)`, matching `build_simulated_input`.
+  """
+  sim = GeoMediaDataSimulator(config)
+  sim.simulate_population_from_real(real_df)
+  sim.align_time_index_to_real(real_df)
+  sim.simulate_controls()
+  sim.simulate_media_from_real(
+      real_df, rf_source_map, plain_source_map, verbose=False
+  )
   sim.simulate_cost_and_unit_value()
   sim.simulate_intercepts()
   sim.simulate_coefficients()
