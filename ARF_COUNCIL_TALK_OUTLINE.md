@@ -143,8 +143,8 @@ Evaluate marginal ROI at elevated spend, where the concealed error surfaces:
 The error is small where the data is and compounds monotonically with extrapolation. Note
 it is *not* zero at 1x under the `'roi'` default — say "small," not "invisible."
 
-**The interval columns are the beat, not the error columns.** Computed in
-`demo/synthetic/final/mroi-credible-intervals.ipynb` through Meridian's own
+**The interval columns are the beat, not the error columns.** Computed in §5 of
+`demo/synthetic/final/roi-vs-mroi-metric-selection.ipynb` through Meridian's own
 `Analyzer.marginal_roi(new_data=...)`, so the whole calculation is the library's, not ours.
 The single sentence to say out loud:
 
@@ -256,17 +256,18 @@ discriminating — never that it always reads as near-zero error.**
       `demo/synthetic/arf_section1_deck.pptx`). Sections 1, 3–8 still to build.
 - [ ] Decide on final framing: general MMM-methodology point vs. anything Meridian-specific (lean general — avoid reading as criticism of a specific open-source tool).
 - [x] ~~**§5 beat 4 needs credible intervals before it goes in the deck.**~~ **Done** —
-      `demo/synthetic/final/mroi-credible-intervals.ipynb` computes the sweep through
+      §5 of `demo/synthetic/final/roi-vs-mroi-metric-selection.ipynb` computes the sweep through
       Meridian's own `Analyzer.marginal_roi(new_data=...)`, reattaching the saved `.nc`
       posteriors so it runs in seconds without refitting. Result: `default` covers the truth
       at 1 of 5 spend levels, `ec_alpha_only` at 5 of 5. The framing sentence is now
       substantiated rather than asserted. Point estimates agree with the old posterior-mean
       construction to ≲0.4pp, so no conclusion changed.
-- [ ] **Merge the intervals notebook back into `final/roi-vs-mroi-metric-selection.ipynb`.**
-      Instructions are in its §7. Until then §5 of the metric-selection notebook still shows
-      the interval-free version, and its §5 caveat / §7 caveat 2 are stale — remove both on
-      merge. Keeping them separate is fine for building slides; do not ship the repo in this
-      state long-term, since two notebooks now describe the same sweep.
+- [x] ~~Merge the intervals notebook back into `final/roi-vs-mroi-metric-selection.ipynb`.~~
+      **Done** — §5 now computes the sweep through `Analyzer.marginal_roi(new_data=...)` and
+      reports 90% posterior intervals; the stale §5 caveat and §7 caveat 2 are gone. The
+      notebook was re-executed end-to-end and the refit is bit-for-bit reproducible: every
+      figure quoted in this outline is unchanged. `final/` now holds exactly one notebook,
+      and the standalone intervals notebook is in `archive/`.
 - [ ] **Re-check beats 1–5 against beat 6's scenario labelling when building slides.** The
       final notebook's primary scenario is `ec9` (true `ec_m` 9.0); `ec11` (11.069) now
       exists only as the invariance comparison. Do not mix figures across the two.

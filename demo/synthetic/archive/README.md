@@ -42,6 +42,11 @@ against `data_simulator_v1_complex.py`, not the current `../data_simulator.py`.
 - `tv-test-under-simple-dgp-coefficient-prior-low-roi.ipynb` — the same at lower target ROI (3.0/2.0/1.0), the robustness check that the finding does not depend on assumed ROI levels.
 - `tv-test-under-simple-dgp-coefficient-prior-low-roi-noisy-freq.ipynb` — a further sensitivity variant: target ROI 2.0/1.5/1.0, `frequency_noise_sd` 0.5 (10x the sibling's), tighter Display frequency range, explicit `adstock_retention_range`. Renamed from `... copy.ipynb`, which made a real variant run look like an accidental duplicate.
 
+### Merged into the landed notebook
+- `mroi-credible-intervals.ipynb` — computed §5's mROI sweep as posterior *intervals* rather than point estimates, via `Analyzer.marginal_roi(new_data=...)`. **Merged into `../final/roi-vs-mroi-metric-selection.ipynb` §5**, so its results are current — they just live there now. Archived to avoid two notebooks describing the same sweep.
+
+  Worth reading for one technique the merged version does not keep: it reattaches saved `.nc` posteriors with `Meridian(input_data=..., model_spec=..., inference_data=az.from_netcdf(...))`, recomputing analysis in ~2 seconds instead of re-running ~10 minutes of MCMC. NetCDF is portable where `save_mmm`/`load_mmm`'s joblib pickles are not. The merged §5 drops it only because that notebook fits its models inline. Reach for this pattern when iterating on analysis over fits you already have.
+
 ### Mechanism side-quests
 - `over-saturated-social-both-tails.ipynb` — the default prior fails at *both* ends, over-saturation as well as under-reach.
 - `social-recovery-under-default-priors.ipynb` — why Social is recoverable under default priors when TV is not.
