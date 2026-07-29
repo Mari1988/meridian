@@ -1,7 +1,7 @@
 """Synthetic geo x time media data simulator.
 
 Reproduces the causal, ground-truth-parameterized data-generating process
-used by `simulate_media_data_reach_frequency_state_geo.ipynb`: geo
+used by `archive/simulate_media_data_reach_frequency_state_geo.ipynb`: geo
 populations, control variables, reach x frequency media, adstock/Hill
 transforms, and a KPI/revenue outcome with known ground-truth coefficients,
 so posterior estimates from a fitted Meridian model can be checked against
@@ -17,7 +17,7 @@ Media execution (`simulate_media`) is deliberately kept to three named,
 independently-justified layers -- a shared seasonal signal, per-channel
 on/off flighting, and per-channel AR(1) noise -- rather than a larger stack
 of mechanisms, so the DGP stays simple enough to state and audit in a single
-paragraph. See `data_simulator_v1_complex.py` for an earlier, richer version
+paragraph. See `archive/data_simulator_v1_complex.py` for an earlier, richer version
 (seasonal jitter, ramp-smoothed flighting, secular trend, promo spikes) kept
 for reference.
 """

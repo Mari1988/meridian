@@ -9,11 +9,12 @@
 For §5–6 specifically, the metric-selection evidence lives in
 `demo/synthetic/final/roi-vs-mroi-metric-selection.ipynb` (which metric exposes the failure,
 and which conceals it) — **this is the landed final notebook; every §5 number below is read
-from its executed outputs**. The real-data-scaled scenario is in
-`demo/synthetic/tv-test-under-real-demo-data-roi-shape-coupling.ipynb` (renamed from
-`final-tv-test-...` — it is *not* the final notebook, and it is `coefficient`-parameterized;
-its ROI/curve-shape coupling is now folded into the final notebook via
-`roi_ec_elasticity=-0.3`). The low-ROI
+from its executed outputs**. It is *itself* the real-data-scaled scenario — it builds on
+Meridian's own `geo_media_rf.csv` demo data via `build_real_augmented_input`, and it carries
+the ROI/curve-shape coupling (`roi_ec_elasticity=-0.3`) that used to require a separate
+notebook. **There is no longer a second notebook to cite for §5–6**; the earlier
+`final-tv-test-under-real-demo-data-roi-shape-coupling.ipynb` is superseded and now sits in
+`demo/synthetic/archive/` under its corrected name. The low-ROI
 robustness run is in `demo/synthetic/fitted_models/lowroi_metric_selection/` (CSVs +
 `run.log`; gitignored, regenerate rather than cite from memory).
 
