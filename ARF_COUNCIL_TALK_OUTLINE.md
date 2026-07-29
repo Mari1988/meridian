@@ -132,16 +132,36 @@ walking a ridge, not exploring a well. **Keep this in backup, not on the slide.*
 **Beat 4 — so ask the question you built the model for.** Should I spend more here?
 Evaluate marginal ROI at elevated spend, where the concealed error surfaces:
 
-| spend | true mROI | default | error |
-|---|---|---|---|
-| 1x | 5.977 | 5.550 | **−7.1%** — small enough to shrug off |
-| 2x | 4.933 | 3.529 | **−28.5%** |
-| 3x | 4.150 | 2.455 | **−40.9%** |
-| 5x | 3.066 | 1.394 | **−54.5%** |
-| 10x | 1.698 | 0.540 | **−68.2%** |
+| spend | true mROI | default | error | default 90% interval | covers truth? |
+|---|---|---|---|---|---|
+| 1x | 5.977 | 5.550 | **−7.1%** — small enough to shrug off | (4.97, 6.14) | **yes** |
+| 2x | 4.933 | 3.514 | **−28.8%** | (3.03, 4.05) | **no** |
+| 3x | 4.150 | 2.442 | **−41.2%** | (2.00, 2.91) | **no** |
+| 5x | 3.066 | 1.388 | **−54.7%** | (1.04, 1.71) | **no** |
+| 10x | 1.698 | 0.540 | **−68.2%** | (0.38, 0.72) | **no** |
 
 The error is small where the data is and compounds monotonically with extrapolation. Note
 it is *not* zero at 1x under the `'roi'` default — say "small," not "invisible."
+
+**The interval columns are the beat, not the error columns.** Computed in
+`demo/synthetic/final/mroi-credible-intervals.ipynb` through Meridian's own
+`Analyzer.marginal_roi(new_data=...)`, so the whole calculation is the library's, not ours.
+The single sentence to say out loud:
+
+> The default model's 90% interval covers the truth at exactly one spend level — the one
+> you already have data for. At every level where you'd actually make a decision, it
+> excludes the truth entirely.
+
+`ec_alpha_only` covers the truth at **5 of 5** levels. That contrast — 1-of-5 vs. 5-of-5 —
+is what makes this "confidently wrong" rather than "uncertain," and it is the claim the
+section's framing sentence has been resting on. The slide is the banded chart at
+`fitted_models/mroi_metric_selection/ec9_mroi_intervals.png`: the default's band separates
+from the truth after 1x and never rejoins.
+
+Point estimates shifted by ≲0.4pp versus the earlier posterior-mean construction (3x was
+−40.9%, now −41.2%) because these come from Meridian's analyzer rather than the hand-rolled
+curve. **Quote the interval version.** The agreement is itself worth one line in backup: it
+means the original §5 math was right and only lacked uncertainty.
 
 **Beat 5 — the informed prior fixes it.** `ec_alpha_only` tracks truth to within ~2%
 across the entire sweep (−2.0% at 1x, −1.6% at 3x, −0.8% at 10x) — and it gets *more*
@@ -188,7 +208,7 @@ sufficient for the argument.
 #### Metric ranking (backup slide, or hand-out)
 | rank | metric | default error | verdict |
 |---|---|---|---|
-| 1 | mROI at 3x spend | −40.9% | Sharpest, and it *is* the planner's question |
+| 1 | mROI at 3x spend | −41.2%, 90% interval (2.00, 2.91) excludes truth 4.150 | Sharpest, and it *is* the planner's question. Quote the interval, not the point error. |
 | 2 | mROI/ROI at current spend | 0.733 vs. true 0.897 | No extrapolation needed; `ec_m` in decision language |
 | 3 | `roi_m` | +13.7% | Weak — interval nearly touches truth |
 | 4 | mROI at current spend | −7.1% | **Least discriminating of the four. Do not lead with it.** |
@@ -235,15 +255,18 @@ discriminating — never that it always reads as near-zero error.**
 - [x] ~~Turn this outline into an actual slide deck.~~ **Section 2 built** (4 slides,
       `demo/synthetic/arf_section1_deck.pptx`). Sections 1, 3–8 still to build.
 - [ ] Decide on final framing: general MMM-methodology point vs. anything Meridian-specific (lean general — avoid reading as criticism of a specific open-source tool).
-- [ ] **§5 beat 4 needs credible intervals before it goes in the deck.** The mROI sweep
-      numbers are posterior-*mean* point estimates. Re-run through
-      `marginal_roi(new_data=...)` and `response_curves(spend_multipliers=...)` so the
-      default-vs-truth gap shows as non-overlapping intervals rather than differing means.
-      Flagged in `final/roi-vs-mroi-metric-selection.ipynb` §5 and caveat 2 of §7 as well.
-      **This is the section's framing sentence at stake**: "confidently wrong, not merely
-      uncertain" is a claim about intervals, and nothing at elevated spend substantiates it
-      yet. Beat 6's invariance table does not have this problem and is interval-free by
-      construction — if the intervals are not ready in time, lead §5 on beat 6.
+- [x] ~~**§5 beat 4 needs credible intervals before it goes in the deck.**~~ **Done** —
+      `demo/synthetic/final/mroi-credible-intervals.ipynb` computes the sweep through
+      Meridian's own `Analyzer.marginal_roi(new_data=...)`, reattaching the saved `.nc`
+      posteriors so it runs in seconds without refitting. Result: `default` covers the truth
+      at 1 of 5 spend levels, `ec_alpha_only` at 5 of 5. The framing sentence is now
+      substantiated rather than asserted. Point estimates agree with the old posterior-mean
+      construction to ≲0.4pp, so no conclusion changed.
+- [ ] **Merge the intervals notebook back into `final/roi-vs-mroi-metric-selection.ipynb`.**
+      Instructions are in its §7. Until then §5 of the metric-selection notebook still shows
+      the interval-free version, and its §5 caveat / §7 caveat 2 are stale — remove both on
+      merge. Keeping them separate is fine for building slides; do not ship the repo in this
+      state long-term, since two notebooks now describe the same sweep.
 - [ ] **Re-check beats 1–5 against beat 6's scenario labelling when building slides.** The
       final notebook's primary scenario is `ec9` (true `ec_m` 9.0); `ec11` (11.069) now
       exists only as the invariance comparison. Do not mix figures across the two.
