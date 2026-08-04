@@ -1,6 +1,91 @@
 # ARF Analytics Council talk — outline
 
-**Status:** draft outline, not yet turned into slides. Update this file as the talk gets prepared/delivered.
+**Status:** 8 slides built in `demo/synthetic/arf_section1_deck.pptx` — §2's four
+assumption slides plus four results slides. Sections 1, 3, 4, 6, 7, 8 of this outline are
+still unbuilt. Update this file as the talk gets prepared/delivered.
+
+**Changes on 2026-08-02 — a SECOND arm, not a replacement. The deck still renders from
+the realistic-baseline run described below; nothing here supersedes it.**
+
+- **`scratch_ablation_r90_wellspec.py`** re-runs the same 10 seeds, same truths, same
+  seeded anchor perturbation, with a baseline the fitted spline represents exactly
+  (`mu_ar1_sd=0`, `seasonal_amplitude=0`; oracle R² held at 0.9 by rescaling the
+  geo-level residual). See CLAUDE.md's deck section for the full record.
+- **The ROI numbers in §5 and on slide 8 are baseline-conditional and must be said as
+  such.** Channel-1's default ROI overstatement is **+40.3% on the realistic baseline and
+  +15.4% on a well-specified one**; informed goes **+20.6% → +1.9%**. Roughly two-thirds
+  of the default's ROI error is baseline misspecification, not the prior. `ec_m` barely
+  moves (−67.7% → −64.2%), which is the argument for leading on it.
+- **Adstock on Channel-1 was largely a baseline artifact** (+15.2% → +1.2% default): a
+  persistent national AR(1) shock reads as carryover. The `max_lag` discussion below is
+  still true but is not the whole story.
+- **Two things that cut against us, say them:** with the confound removed the informed
+  arm's `ec_m` tracks its anchor at r = 0.96, slope 1.19 — its accuracy is inherited, not
+  estimated. And `alpha_m` misses in *both* arms on Channel-2 (−3.3 / −2.1 percentage
+  points against a true 0.15), unexplained.
+- **Use the pair, not the replacement.** "The saturation failure survives even when the
+  model is handed a baseline it can fit perfectly" removes the "your simulation was
+  adversarial" objection, which is the strongest attack currently available on §5.
+
+**Changes on 2026-08-01, read before quoting the deck. The results were RE-RUN;
+every figure below this line supersedes anything above it.**
+
+- **The seed sweep was rebuilt because it varied two things at once.** True ROI was
+  drifting between seeds (Channel-1: 6.60 / 10.88 / 8.35) because `target_roi_m`
+  normalises by a *cross-channel* geometric mean, so Channel-2's per-seed `alpha_m`
+  draw moved Channel-1's true ROI. A sweep whose estimand moves cannot separate "the
+  estimator is noisy" from "the estimator behaves differently at a different truth".
+  `demo/synthetic/r90_basis.py` now pins every truth for both channels and asserts it
+  on every build. **10 seeds**, identical truths, only noise varies.
+- **The informed prior is no longer an oracle.** It was centred on the exact true
+  `ec_m`/`alpha_m`, which no media team could supply and which is unbiased by
+  construction. Both anchors are now perturbed ~25% per seed. **This is the single
+  most important change for credibility, and it costs accuracy — say so.**
+- **Headline results at the pinned basis (10 seeds, achievable prior):**
+  Channel-1 `ec_m` default **−69%** median (wrong on 10/10, range −56 to −76) vs
+  informed **−4%** median (10/10 wins, but range −53 to +43 — centred, not precise).
+  Channel-2 `ec_m` default **+5%**. ROI default +44% → informed +21%. Adstock
+  unchanged either way (~+17% both).
+  mROI: Channel-1 default **+13% at 1x → −58% at 10x** with the 90% interval
+  containing the truth on **0/10** datasets at 5x and 10x; Channel-2 never worse than
+  **6%** at any multiplier for either prior.
+- **The mechanism, measured:** the informed posterior's `ec_m` error tracks its anchor
+  error with **slope 0.98, r = 0.80** — one-for-one, no meaningful shrinkage from the
+  data. Adstock does *not* follow its anchor (r = 0.05), so the likelihood does pin
+  that down. This is the thesis on both arms: the model relays the saturation
+  assumption rather than estimating it. Caveat: R² = 0.63, so a good anchor is no
+  guarantee on any single dataset (seeds 42 and 99 had near-correct anchors and still
+  came out +43% / +31%).
+- **Slide 9 (response curves) was cut** — slide 8's two mROI panels make the same
+  point in the planner's own units, and make it on two channels.
+
+**Superseded by the above:**
+- **Slides 5, 7, 8, 9 are on the r90 basis** (`alpha_m=0.3`, `oracle_r2=0.9`, 3 seeds:
+  1320, 7, 42), not the `alpha_m=0.8`/`oracle_r2=0.80` ten-draw run this outline's §5
+  discusses. Slide 6 is the only results slide still on the canonical run, and only
+  because its ceiling fractions depend on `ec_m` alone, which is identical across the two.
+- **The seed-stability slide was cut** (was slide 10). Slide 7's box plot carries the
+  replication story. **Its unique job — "do not quote any single ROI figure as
+  characteristic" — now has no slide of its own**; say it aloud on slide 8, or the
+  saturation claim loses the honesty that made it credible.
+- **The deck ships with no speaker notes.** They are written by hand. The guidance text
+  survives in `build_section1_deck.py` behind `EMIT_NOTES = False`.
+- **Channels are named Channel-1 (was TV) and Channel-2 (was Display)** on every slide, so
+  the argument reads as being about under-invested channels rather than about television.
+  The data side still uses `TV` / `Display` — mapped by `demo/synthetic/channel_labels.py`.
+- ~~Headline numbers at the 3-seed r90 basis: Channel-1 `ec_m` `-71%` to `-52%`
+  (default) vs `-4%` to `+8%` (informed); `roi_m` median `+32%` → `+14%`; default mROI
+  `+8%` at 1x → `-47%` at 10x; response curves crossing at `4.1x`.~~ **All from the
+  drifting-truth sweep with an oracle prior. Do not quote.**
+
+> **⚠ The results slides are built from a different, harder DGP than §5 below describes.**
+> §5's numbers come from `final/roi-vs-mroi-metric-selection.ipynb`, whose simulation
+> flatters the model in two ways since corrected: the baseline was drawn from the model's
+> own spline basis, and the noise was independent week to week. The deck's slides 5–10 use
+> `realistic-baseline-noise-2ch.ipynb` (+ `-seeds`) instead: a baseline the fitted spline
+> structurally cannot represent, persistent cross-region noise, and an achievable R² of
+> 0.80 rather than 0.996. **Where the two disagree, the deck is current and §5 is
+> superseded** — see "What the realistic DGP changed" below.
 
 **Context:** invited by Sable (ARF) to present to the ARF Analytics Council, currently focused on "unpacking key challenges and emerging solutions in MMM." Session scheduled for Tuesday, August 4 at 11:00am PT / 1:00pm CT / 2:00pm ET. Council mission: identify common data uses in the current martech environment, explore evolving methodologies, and develop guidelines/best practices across audience development, channel optimization, and cross-media measurement — with a core goal of demystifying/democratizing the "black box" of analytics.
 
@@ -100,6 +185,30 @@ claim is about the default. No reach/frequency in this section.
 - **Caveat to state explicitly, up front:** the *specific* saturation threshold used to build the simulation is a stylized assumption, not a claim about real-world saturation levels. The point being tested is the *mechanism* (does the prior distort recovery when truth is far from the default's assumption), not that specific number.
 
 ### 5. The finding (5 min — the core section)
+
+> **SUPERSEDED — read this first.** Every number in the six beats below comes from
+> `final/roi-vs-mroi-metric-selection.ipynb`, whose DGP drew the time-varying baseline
+> from the *same 8-knot spline basis the model fits* (`n_knots_mu_t=8`) and used iid
+> residuals, giving an unrealistic R² of 0.996. The rebuilt DGP
+> (`realistic-baseline-noise-2ch.ipynb`, `realistic_baseline.py`) removes both
+> advantages and lands at an achievable R² of 0.80. **The findings survive and sharpen**,
+> but the figures move, and two claims below are now retired outright:
+>
+> - **Beat 2's "ROI looks fine" hook does not hold on the realistic DGP.** The default's
+>   TV ROI error is +79.0% there, not +13.7%, and its interval excludes the truth — a
+>   practitioner would catch it. Worse, across ten simulator draws the ROI error ranges
+>   −12.7% to +181.7% for the default and −27.7% to +78.6% for the informed prior. **Do
+>   not quote any single ROI figure as characteristic**, ours included.
+> - **The `alpha_m` prior earns nothing.** Across ten draws the informed prior is better
+>   on alpha in only 3 of 10 — chance. The entire benefit comes from the `ec_m` prior, so
+>   §7's ask drops to *one* elicited quantity, not two.
+>
+> Current headline figures, all from the two-channel realistic DGP at oracle R² = 0.80:
+> TV `ec_m` −89.4% (default) vs −0.8% (informed); mROI at 3× −65.5% with the default's
+> 90% band **excluding** the truth at 2×, 3×, 5× and 10×; across ten draws default `ec_m`
+> −66.5% to −90.0% against informed −4.7% to +3.1%, non-overlapping.
+>
+> **Slides 5–10 of `demo/synthetic/arf_section1_deck.pptx` are built from these numbers.**
 
 **Six beats, in this order.** The sequence matters more than any single number: the
 "ROI looks fine" beat is not a concession, it is the hook. Do not cut it (see the
@@ -226,6 +335,47 @@ old `'coefficient'` parameterization the cancellation was near-exact; under the 
 default it is partial. **The defensible claim is that this metric is consistently the least
 discriminating — never that it always reads as near-zero error.**
 
+#### What the realistic DGP changed — read before quoting anything above
+
+The deck's slides 5–10 are built on `realistic-baseline-noise-2ch.ipynb` (+ `-seeds`),
+which removes the two ways the DGP above flattered the model: the baseline is no longer
+drawn from the model's own spline basis, and the noise is persistent and correlated across
+regions rather than independent. Achievable R² falls from 0.996 to 0.80. Everything in this
+section was recomputed there. Four things changed.
+
+**1. The saturation failure got worse, and it is seed-independent.** Fitted TV `ec_m` under
+the default is 0.958 against a truth of 9.0 (−89.4%), versus 2.84 (−68%) on the old DGP.
+Across ten draws the default lands between **−66.5% and −90.0%** and the reach-informed
+prior between **−4.7% and +3.1%** — the distributions never overlap. Quote the range, not
+seed 1320's −89.4%, which sits at the pessimistic edge.
+
+**2. The mROI sweep is sharper and now has credible intervals.** Superseding beat 4's
+table: default error is −7.0% at 1x, −49.4% at 2x, **−65.5% at 3x**, −78.5% at 5x, −87.9%
+at 10x, and the default's 90% band **excludes the truth at 2x and beyond** while containing
+it at 1x. That substantiates "confidently wrong, not merely uncertain" at elevated spend
+for the first time. The reach-informed prior tracks the truth to within 1% at every
+multiplier.
+
+**3. Beat 2's "every standard diagnostic is clean" is no longer available.** On this DGP
+the default's TV ROI is **+79%** and its interval excludes the truth — a practitioner would
+catch it. The invisible-failure framing has to be rewritten. The replacement is easier to
+land anyway: *the default prior overstates TV's ROI and understates its saturation point;
+one informed prior fixes the saturation point.*
+
+**4. Do not quote any ROI figure as characteristic.** Across DGP variants the default's TV
+ROI error runs +13.7% (old DGP), −22.5% (3-channel realistic), +79.0% (2-channel
+realistic); across ten draws of the last of these the *informed* prior's own error spans
+−27.7% to +78.6%, and on one draw it is worse than the default. The informed prior wins on
+9 of 10 draws and halves the median error, so the direction is real — the magnitude is not
+quotable. Slide 10 says this out loud, which is what makes the saturation claim credible.
+
+**Also retired:** the reach-informed prior's `alpha_m` component earns nothing. Across ten
+draws it beats the default on carryover 3 times out of 10 — chance. The entire benefit
+comes from the `ec_m` prior, which simplifies §7's ask to a single elicited quantity.
+
+**Not yet recomputed on the realistic DGP:** the budget-reallocation table in §6, the
+`ec_noisy` robustness run in §7, and the metric ranking above. Treat those as provisional.
+
 ### 6. Does the mistake actually change a decision? (3 min)
 - Yes — pull the budget-reallocation table: the default-prior fit recommends materially less spend on the under-reached channel than the true optimum; an audience/reach-informed prior tracks the true optimum instead.
 - This is the "so what": it flows straight into a lower budget recommendation for exactly the channel that should be getting more.
@@ -252,8 +402,19 @@ discriminating — never that it always reads as near-zero error.**
 
 ## Open items / TODO
 - [ ] Re-run `meridian_tv_underreach_case_study.ipynb` at full MCMC settings (`n_adapt=2000`, `N_SEEDS=20`, etc.) before pulling numbers/charts into slides — figures currently referenced in this outline are from reduced-precision smoke-test runs.
-- [x] ~~Turn this outline into an actual slide deck.~~ **Section 2 built** (4 slides,
-      `demo/synthetic/arf_section1_deck.pptx`). Sections 1, 3–8 still to build.
+- [x] ~~Turn this outline into an actual slide deck.~~ **9 slides built**
+      (`demo/synthetic/arf_section1_deck.pptx`): §2's four assumption slides, plus five
+      results slides — the DGP and why it is a fair test, where delivery sits on each
+      channel's true curve, parameter recovery, marginal ROI as spend scales, and the
+      response curves. (The tenth, stability across draws, was cut on 2026-08-01.)
+      Sections 1, 3, 4, 6, 7, 8 still to build. Every quoted number is asserted by
+      `prior_plots_check.py`; the full rebuild sequence is in `CLAUDE.md` under "The ARF
+      deck" — it is no longer a single figures script, since slides 5 and 7–9 render from
+      the r90 scratch scripts.
+- [ ] **Write the speaker notes.** The deck now ships with empty notes fields by choice.
+      The old generated notes remain in `build_section1_deck.py` (suppressed by
+      `EMIT_NOTES = False`) and are worth reading first — they hold the do-not-overclaim
+      guidance, not just narration.
 - [ ] Decide on final framing: general MMM-methodology point vs. anything Meridian-specific (lean general — avoid reading as criticism of a specific open-source tool).
 - [x] ~~**§5 beat 4 needs credible intervals before it goes in the deck.**~~ **Done** —
       §5 of `demo/synthetic/final/roi-vs-mroi-metric-selection.ipynb` computes the sweep through
@@ -271,8 +432,26 @@ discriminating — never that it always reads as near-zero error.**
 - [ ] **Re-check beats 1–5 against beat 6's scenario labelling when building slides.** The
       final notebook's primary scenario is `ec9` (true `ec_m` 9.0); `ec11` (11.069) now
       exists only as the invariance comparison. Do not mix figures across the two.
-- [ ] **§5 numbers come from a single simulator draw (`SIM_SEED = 0`).** The *ordering* of
-      the metric ranking should be stable — it follows from the identification ridge, not
-      from any particular draw — but the magnitudes will move. Either run a handful of
-      seeds and quote a range, or state "single scenario" explicitly on the slide.
-- [ ] Build the §5 two-curves-through-one-point figure (beat 3). Nothing reusable exists yet.
+- [x] ~~**§5 numbers come from a single simulator draw (`SIM_SEED = 0`).** Either run a
+      handful of seeds and quote a range, or state "single scenario" on the slide.~~
+      **Done, and the mechanism was broken.** `SIM_SEED` never did anything:
+      `GeoMediaDataSimulator.__init__` called `tf.random.set_seed(config.seed_num)`
+      immediately after, overriding any caller-set seed, and `data_simulator.py` makes no
+      `np.random` calls — so **every figure in this study came from `seed_num` 1320**.
+      `seed_num` is now `int | None` and only sets the seed when not `None`; default
+      behaviour is unchanged and the landed scenario still reproduces bit-identically
+      (KPI checksum 5.841398e+09). Ten draws are swept in
+      `realistic-baseline-noise-2ch-seeds.ipynb` via `seed_sweep_worker.py` (one process
+      per draw — forty fits in one kernel exhausts memory and kills it). Result: `ec_m` and
+      the invariance separation are structural; **ROI is not** — see below.
+- [x] ~~Build the §5 two-curves-through-one-point figure (beat 3).~~ **Built as slide 9,
+      with the premise corrected.** On the realistic DGP the curves do *not* pass through
+      the same point: the default's curve sits above the truth at today's spend and below
+      it further out, crossing at ~3.4x. The honest framing is stronger — a curve forced to
+      flatten too early can only match the observed outcome by being too steep at the
+      start, so the same error both over-credits the channel today and under-funds it
+      tomorrow. Do not say "both curves fit today's data equally well"; the chart
+      contradicts it.
+- [ ] Still `SIM_SEED`-based no-ops in `final/roi-vs-mroi-metric-selection.ipynb` and the
+      other study notebooks — harmless but misleading. Remove them, or pass `seed_num`
+      explicitly, when those notebooks are next touched.
