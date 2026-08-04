@@ -94,6 +94,11 @@ def check(slide_no, slide):
 
 prs = Presentation(DECK)
 bad = False
-for idx in (7, 8, 10):
-  bad |= check(idx + 1, prs.slides[idx])
+# Every slide, not a hardcoded list: slide indices shift the moment anything
+# is inserted, and a fixed list then silently checks the wrong slides.
+only = [int(a) for a in sys.argv[2:]] or None
+for idx, slide in enumerate(prs.slides):
+  if only and idx + 1 not in only:
+    continue
+  bad |= check(idx + 1, slide)
 print('\nRESULT:', 'PROBLEMS FOUND' if bad else 'all text fits')
