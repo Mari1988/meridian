@@ -126,7 +126,14 @@ class SimulationConfig:
   n_imp_channels: int = 3
   n_controls: int = 3
   n_times: int = 156  # 3 years of weekly data.
-  seed_num: int = 1320
+  # THE seed for the whole DGP. `GeoMediaDataSimulator.__init__` calls
+  # `tf.random.set_seed(seed_num)`, and every simulated quantity is drawn
+  # through TFP (this module makes no `np.random` calls), so varying this is
+  # the *only* way to get a different draw -- a caller-set
+  # `tf.random.set_seed(...)` before construction is overridden and has no
+  # effect. Pass `None` to leave the ambient TF seed alone and let the caller
+  # own seeding instead.
+  seed_num: int | None = 1320
   channel_names: list[str] = dataclasses.field(
       default_factory=lambda: ['TV', 'Display', 'Social']
   )
@@ -434,7 +441,8 @@ class GeoMediaDataSimulator:
 
   def __init__(self, config: SimulationConfig):
     self.config = config
-    tf.random.set_seed(config.seed_num)
+    if config.seed_num is not None:
+      tf.random.set_seed(config.seed_num)
     dates = [
         config.start_date + datetime.timedelta(weeks=w)
         for w in range(config.n_times)

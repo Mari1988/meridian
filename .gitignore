@@ -34,5 +34,38 @@ proto/mmm/**/*_pb2.py
 # virtualenv
 .venv/
 
-# Fitted model artifacts from synthetic prior-recovery runs (large binaries).
-demo/synthetic/fitted_models/
+# PowerPoint/Office lock files, left behind while a deck is open.
+~$*
+
+# Fitted model artifacts from synthetic prior-recovery runs.
+#
+# The binaries (.nc inference data, joblib pickles) are large and regenerable,
+# so they stay out. The small CSVs do NOT: they are the source of truth for the
+# ARF deck's results slides -- `results_facts.py` reads them and
+# `prior_plots_check.py` asserts against them, so a clone without them cannot
+# rebuild or verify the deck without a re-fit. ~72KB, worth tracking.
+# Scoped deliberately to the two run directories that back the deck. A blanket
+# `**/*.csv` exception would also commit ~50 CSVs from superseded exploratory
+# runs, which the study's own notes say must not be quoted -- tracking those
+# would obscure provenance rather than establish it.
+# NOTE ON THE PATTERN BELOW -- the obvious version does not work.
+# `fitted_models/**` ignores the run DIRECTORIES, and git never descends into
+# an ignored directory, so a later `!.../<run>/*.csv` is never evaluated. The
+# previous version of this block had exactly that bug: it looked like it
+# tracked the realistic_baseline_2ch CSVs and tracked nothing at all. The
+# working idiom is to unignore the directory, re-ignore its contents, then
+# unignore the files wanted -- one level at a time.
+demo/synthetic/fitted_models/*
+# Descend into the runs that back the deck. `_wellspec` at 50 draws is what
+# slides 8, 9, 10 and the takeaways render from; `_pinned` backed the earlier
+# 10-draw version; `_centred` is the exact-anchor decomposition.
+!demo/synthetic/fitted_models/realistic_baseline_2ch/
+!demo/synthetic/fitted_models/realistic_baseline_2ch_seeds/
+!demo/synthetic/fitted_models/scratch_ablation_r90_wellspec/
+!demo/synthetic/fitted_models/scratch_ablation_r90_pinned/
+!demo/synthetic/fitted_models/scratch_ablation_r90_centred_wellspec/
+# Inside those, ignore everything -- including `models/`, which holds ~380MB
+# of .nc posteriors -- then admit the summary CSVs only. Superseded run dirs
+# are already ignored above, so this exception cannot reach them.
+demo/synthetic/fitted_models/*/*
+!demo/synthetic/fitted_models/*/*.csv

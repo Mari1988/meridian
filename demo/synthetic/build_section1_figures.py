@@ -59,14 +59,10 @@ def build_all() -> list[str]:
   prior_plots.plot_slope_shapes(ax_left, ax_right)
   paths.append(_save(fig, 'section1_slope.png'))
 
-  # Slide 4 -- adstock, plus the per-channel-bounds contrast.
+  # Slide 4 -- adstock.
   fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=FIGSIZE)
-  prior_plots.plot_adstock_decay_and_immediacy(ax_left, ax_right)
+  prior_plots.plot_adstock_prior_and_decay(ax_left, ax_right)
   paths.append(_save(fig, 'section1_adstock.png'))
-
-  fig, ax = plt.subplots(1, 1, figsize=(13.33, 3.4))
-  prior_plots.plot_robyn_theta_comparison(ax)
-  paths.append(_save(fig, 'section1_adstock_robyn_bounds.png'))
 
   return paths
 

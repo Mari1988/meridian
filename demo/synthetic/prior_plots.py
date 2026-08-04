@@ -15,15 +15,13 @@
 """Figures for section 1 of the ARF Analytics Council talk.
 
 Section 1 asks "what does an MMM assume before it sees your data?" and answers
-it with three of Meridian's out-of-the-box defaults, each contrasted against
-Robyn's corresponding choice:
+it with three of Meridian's out-of-the-box defaults:
 
   * `ec_m` (half-saturation)  -- a prior that is centered on the status quo.
   * `slope_m` (Hill slope)    -- not estimated at all; fixed at 1.0.
-  * `alpha_m` (adstock decay) -- genuinely flat, but flat on the parameter is
-                                 not flat on the quantity a marketer cares
-                                 about; and the binding assumption (`max_lag`)
-                                 is not a prior in the first place.
+  * `alpha_m` (adstock decay) -- genuinely flat, no complaint there; but the
+                                 binding assumption (`max_lag`) is not a prior
+                                 in the first place.
 
 Nothing here fits a model or runs MCMC -- every number is either analytic or a
 draw from a prior, so the whole module renders in seconds. Hill curves are
@@ -35,7 +33,6 @@ Sources for the default values quoted here:
   * `meridian/model/prior_distribution.py` (`ec_m`, `slope_m`, `alpha_m`)
   * `meridian/model/spec.py` (`max_lag`)
   * https://developers.google.com/meridian/docs/advanced-modeling/default-prior-distributions
-  * https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM
 """
 
 from __future__ import annotations
@@ -60,18 +57,6 @@ ALPHA_M_LOW = 0.0
 ALPHA_M_HIGH = 1.0
 # `spec.py:237` -- a hard truncation, not a prior.
 MAX_LAG = 8
-
-# --- Robyn's corresponding search bounds. --------------------------------
-# NOTE: Robyn is ridge regression with Nevergrad hyperparameter search, not a
-# Bayesian model, so these are *search bounds*, not priors. The comparison is
-# about which quantities each tool treats as knowable from data.
-ROBYN_ALPHA_BOUNDS = (0.5, 3.0)  # ~= Meridian's `slope_m`.
-ROBYN_GAMMA_BOUNDS = (0.3, 1.0)  # ~= Meridian's `ec_m`.
-ROBYN_THETA_BOUNDS = {  # ~= Meridian's `alpha_m`, but per channel type.
-    'TV': (0.3, 0.8),
-    'OOH / print / radio': (0.1, 0.4),
-    'Digital': (0.0, 0.3),
-}
 
 # Consistent with the response-curve overlay already used in
 # `meridian_tv_underreach_case_study.ipynb`.
@@ -109,6 +94,11 @@ def _adstock_weights(alpha: np.ndarray, max_lag: int = MAX_LAG) -> np.ndarray:
   return weights / weights.sum(axis=1, keepdims=True)
 
 
+def half_life(alpha: np.ndarray) -> np.ndarray:
+  """Weeks for adstock weight to decay by half: alpha = 0.5^(1/half_life)."""
+  return np.log(0.5) / np.log(alpha)
+
+
 def default_prior_facts() -> dict[str, float]:
   """Numbers quoted on the section 1 slides, computed from the defaults.
 
@@ -117,15 +107,11 @@ def default_prior_facts() -> dict[str, float]:
   notes quote them.
   """
   ec = _ec_m_prior()
-  rng = np.random.default_rng(_SEED)
 
   # `ec_m` is denominated in multiples of the channel's own median non-zero
   # per-capita execution, so x=1.0 is "what you already run".
   ec_draws = ec.rvs(_N_PRIOR_DRAWS, random_state=_SEED)
   ceiling_frac_today = 1.0 / (1.0 + ec_draws)  # hill(1) with slope=1.
-
-  alpha_draws = rng.uniform(ALPHA_M_LOW, ALPHA_M_HIGH, _N_PRIOR_DRAWS)
-  week0_share = _adstock_weights(alpha_draws)[:, 0]
 
   return {
       # Slide 2 -- saturation.
@@ -133,14 +119,12 @@ def default_prior_facts() -> dict[str, float]:
       'ec_m_q05': float(ec.ppf(0.05)),
       'ec_m_q95': float(ec.ppf(0.95)),
       'p_past_half_saturation_today': float(ec.cdf(1.0)),
+      'p_ec_within_50pct_of_today': float(ec.cdf(1.5) - ec.cdf(0.5)),
       'p_over_third_of_ceiling_today': float(
           np.mean(ceiling_frac_today > 1 / 3)
       ),
       'median_ceiling_frac_today': float(np.median(ceiling_frac_today)),
       # Slide 4 -- adstock.
-      'week0_share_median': float(np.median(week0_share)),
-      'p_week0_share_ge_70': float(np.mean(week0_share >= 0.7)),
-      'p_week0_share_le_30': float(np.mean(week0_share <= 0.3)),
       'carryover_lost_beyond_max_lag_at_alpha_090': float(0.9 ** (MAX_LAG + 1)),
   }
 
@@ -159,21 +143,25 @@ def plot_ec_prior_and_curves(ax_density, ax_curves) -> None:
   grid = np.linspace(EC_M_LOW, 4.0, 500)
   ax_density.plot(grid, ec.pdf(grid), color=PRIOR_COLOR, lw=2.5)
   ax_density.fill_between(
-      grid, ec.pdf(grid), where=grid <= 1.0, color=PRIOR_COLOR, alpha=0.25
+      grid,
+      ec.pdf(grid),
+      where=(grid >= 0.5) & (grid <= 1.5),
+      color=PRIOR_COLOR,
+      alpha=0.25,
   )
   ax_density.axvline(1.0, color=TODAY_COLOR, lw=2, ls='--')
   ax_density.annotate(
       'what you\nrun today',
       xy=(1.0, ax_density.get_ylim()[1] * 0.92),
-      xytext=(1.55, ec.pdf(grid).max() * 0.88),
+      xytext=(1.75, ec.pdf(grid).max() * 0.88),
       color=TODAY_COLOR,
       fontsize=10,
       arrowprops=dict(arrowstyle='->', color=TODAY_COLOR, lw=1.4),
   )
   ax_density.text(
-      0.42,
+      0.65,
       ec.pdf(grid).max() * 0.30,
-      f'{facts["p_past_half_saturation_today"]:.0%}\nof the prior',
+      f'{facts["p_ec_within_50pct_of_today"]:.0%}\nwithin ±50%\nof today',
       color=PRIOR_COLOR,
       fontsize=10,
       ha='center',
@@ -189,11 +177,19 @@ def plot_ec_prior_and_curves(ax_density, ax_curves) -> None:
   )
   ax_density.set_xlim(0, 4.0)
 
-  # --- Right: what those draws mean as response curves. ---
-  x = np.linspace(0.01, 3.0, 120)
-  draws = ec.rvs(150, random_state=_SEED)
+  # --- Right: what those draws mean as response curves, as a fan chart. ---
+  x = np.linspace(0.01, 3.0, 200)
+  draws = ec.rvs(5000, random_state=_SEED)
   curves = hill_value(x, draws, slope=np.full_like(draws, SLOPE_M_FIXED))
-  ax_curves.plot(x, curves, color=PRIOR_COLOR, alpha=0.10, lw=1.0)
+  for lo, hi, alpha in ((10, 90, 0.18), (25, 75, 0.30)):
+    ax_curves.fill_between(
+        x,
+        np.percentile(curves, lo, axis=1),
+        np.percentile(curves, hi, axis=1),
+        color=PRIOR_COLOR,
+        alpha=alpha,
+        label=f'{lo}-{hi}th percentile',
+    )
   median_curve = hill_value(
       x, np.array([ec.median()]), slope=np.array([SLOPE_M_FIXED])
   )[:, 0]
@@ -202,26 +198,13 @@ def plot_ec_prior_and_curves(ax_density, ax_curves) -> None:
   )
   ax_curves.axvline(1.0, color=TODAY_COLOR, lw=2, ls='--', label='Today')
   ax_curves.axhline(0.5, color='grey', lw=1, ls=':')
-  # The whole slide in one annotation.
   ax_curves.plot([1.0], [0.5], marker='o', color=TODAY_COLOR, ms=10, zorder=5)
-  ax_curves.annotate(
-      "The median channel is already\nhalf-saturated at today's spend",
-      xy=(1.0, 0.5),
-      xytext=(1.35, 0.26),
-      fontsize=10,
-      color=TODAY_COLOR,
-      fontweight='bold',
-      arrowprops=dict(arrowstyle='->', color=TODAY_COLOR, lw=1.6),
-  )
-  ax_curves.set_xlabel('Media execution (multiples of today)')
+  ax_curves.set_xlabel('Multiples of your current execution')
   ax_curves.set_ylabel('Fraction of ceiling effect')
-  ax_curves.set_title(
-      'Every curve the default considers plausible, before seeing data',
-      fontsize=11,
-  )
+  ax_curves.set_title('Implied response curve', fontsize=11)
   ax_curves.set_ylim(0, 1)
   ax_curves.set_xlim(0, 3)
-  ax_curves.legend(loc='lower right', fontsize=9, framealpha=0.9)
+  ax_curves.legend(loc='lower right', fontsize=8, framealpha=0.9)
 
 
 def plot_slope_shapes(ax_hill, ax_marginal) -> None:
@@ -238,12 +221,11 @@ def plot_slope_shapes(ax_hill, ax_marginal) -> None:
     curve = hill_value(x, np.array([ec]), slope=np.array([slope]))[:, 0]
     is_default = slope == SLOPE_M_FIXED
     # Meridian does *let* you override `slope_m` -- it warns against it
-    # (`prior_distribution.py:844-856`). The claim is about the default, and
-    # about which tool searches this dimension by design.
+    # (`prior_distribution.py:844-856`). The claim is about the default.
     label = (
-        f'slope = {slope:.0f}  (Meridian default -- fixed, never estimated)'
+        f"slope = {slope:.0f}  (Meridian's default)"
         if is_default
-        else f"slope = {slope:.0f}  (S-shape: inside Robyn's search range)"
+        else f'slope = {slope:.0f}'
     )
     ax_hill.plot(
         x,
@@ -267,54 +249,57 @@ def plot_slope_shapes(ax_hill, ax_marginal) -> None:
 
   ax_hill.axvline(1.0, color=TODAY_COLOR, lw=2, ls=':', label='Today')
   ax_hill.set_xlabel('Media execution (multiples of today)')
-  ax_hill.set_ylabel('Fraction of ceiling effect')
-  ax_hill.set_title(
-      'Same Hill equation, one parameter Meridian never estimates', fontsize=11
-  )
+  ax_hill.set_ylabel('Hill output')
+  ax_hill.set_title('Response curve under varying slope', fontsize=11)
   ax_hill.set_ylim(0, 1)
   ax_hill.legend(loc='lower right', fontsize=9, framealpha=0.9)
 
   ax_marginal.set_xlabel('Media execution (multiples of today)')
-  ax_marginal.set_ylabel('Marginal return (d effect / d media)')
-  ax_marginal.set_title(
-      'Dots mark peak marginal return: the default puts it at zero',
-      fontsize=11,
-  )
+  ax_marginal.set_ylabel('Marginal return')
+  ax_marginal.set_title('Marginal return under varying slope', fontsize=11)
   ax_marginal.legend(loc='upper right', fontsize=9, framealpha=0.9)
-  ax_marginal.text(
-      0.98,
-      0.42,
-      'Robyn searches alpha over [0.5, 3.0]\nMeridian fixes slope_m at 1.0',
-      transform=ax_marginal.transAxes,
-      ha='right',
-      va='top',
-      fontsize=9,
-      bbox=dict(boxstyle='round', fc='white', ec='grey', alpha=0.85),
-  )
 
 
-def plot_adstock_decay_and_immediacy(ax_decay, ax_hist) -> None:
-  """Slide 4 -- adstock, where the binding assumption is not the prior.
+def plot_adstock_prior_and_decay(ax_prior, ax_decay) -> None:
+  """Slide 4 -- adstock: the prior is genuinely flat; `max_lag` is the catch.
 
-  Left: decay curves plus the hard `max_lag` cliff. Right: the prior is flat
-  on `alpha_m`, but decidedly not flat on "how much of the effect lands now".
+  Left: `alpha_m`'s flat prior itself, so the room sees there is no hidden
+  skew here (unlike `ec_m`). Right: what different decay rates imply in
+  half-life terms, plus the hard `max_lag` truncation those curves run into.
   """
   facts = default_prior_facts()
-  lags = np.arange(MAX_LAG + 1)
 
-  # --- Left: decay shapes, and what max_lag truncates. ---
+  # --- Left: the flat alpha_m prior. ---
+  height = 1.0 / (ALPHA_M_HIGH - ALPHA_M_LOW)
+  ax_prior.plot(
+      [ALPHA_M_LOW, ALPHA_M_HIGH], [height, height], color=PRIOR_COLOR, lw=2.5
+  )
+  ax_prior.fill_between(
+      [ALPHA_M_LOW, ALPHA_M_HIGH], [height, height],
+      color=PRIOR_COLOR, alpha=0.25,
+  )
+  ax_prior.set_ylim(0, height * 1.3)
+  ax_prior.set_xlim(-0.05, 1.05)
+  ax_prior.set_xlabel('Decay rate (alpha_m)')
+  ax_prior.set_ylabel('Prior density')
+  ax_prior.set_title('Meridian default: alpha_m ~ Uniform(0, 1)', fontsize=11)
+
+  # --- Right: decay shapes by half-life, and what max_lag truncates. ---
+  lags = np.arange(MAX_LAG + 1)
   for alpha, color in zip((0.3, 0.6, 0.9), ACCENT_COLORS):
     weights = _adstock_weights(np.array([alpha]))[0]
+    hl = float(half_life(np.array([alpha]))[0])
     ax_decay.plot(
-        lags, weights, marker='o', color=color, lw=2, label=f'alpha = {alpha}'
+        lags, weights, marker='o', color=color, lw=2,
+        label=f'alpha = {alpha}  (half-life {hl:.1f} wk)',
     )
     if alpha == 0.9:
-      lost = alpha ** (MAX_LAG + 1)
       ax_decay.annotate(
-          f'at alpha=0.9, {lost:.0%} of true carryover\n'
-          'lies beyond week 8 and is discarded',
+          f'at alpha=0.9, '
+          f'{facts["carryover_lost_beyond_max_lag_at_alpha_090"]:.0%} of true '
+          'carryover\nlies beyond week 8 and is discarded',
           xy=(MAX_LAG, weights[-1]),
-          xytext=(3.4, weights.max() * 0.72),
+          xytext=(3.0, weights.max() * 0.72),
           fontsize=9,
           color=color,
           arrowprops=dict(arrowstyle='->', color=color, lw=1.4),
@@ -328,70 +313,6 @@ def plot_adstock_decay_and_immediacy(ax_decay, ax_hist) -> None:
       'max_lag is not a prior -- it is a hard truncation', fontsize=11
   )
   ax_decay.legend(fontsize=9, framealpha=0.9)
-
-  # --- Right: flat on alpha is not flat on immediacy. ---
-  rng = np.random.default_rng(_SEED)
-  alpha_draws = rng.uniform(ALPHA_M_LOW, ALPHA_M_HIGH, _N_PRIOR_DRAWS)
-  week0 = _adstock_weights(alpha_draws)[:, 0]
-  ax_hist.hist(
-      week0, bins=60, color=PRIOR_COLOR, alpha=0.8, density=True, range=(0, 1)
-  )
-  ax_hist.axvline(
-      facts['week0_share_median'],
-      color=TODAY_COLOR,
-      lw=2,
-      ls='--',
-      label=f'median {facts["week0_share_median"]:.0%}',
-  )
-  ax_hist.set_xlabel('Share of the effect landing in week 0')
-  ax_hist.set_ylabel('Implied prior density')
-  ax_hist.set_title(
-      'alpha_m ~ Uniform(0,1) is flat; this is what it implies', fontsize=11
-  )
-  ax_hist.legend(loc='upper right', fontsize=9, framealpha=0.9)
-  ax_hist.set_ylim(0, 2.4)
-  # Shade and label the two tails rather than floating a box over the bars.
-  ax_hist.axvspan(0.0, 0.3, color='grey', alpha=0.10)
-  ax_hist.axvspan(0.7, 1.0, color='grey', alpha=0.10)
-  ax_hist.text(
-      0.15,
-      2.22,
-      f'{facts["p_week0_share_le_30"]:.0%}\nmostly lingers',
-      ha='center',
-      va='top',
-      fontsize=9,
-      fontweight='bold',
-  )
-  ax_hist.text(
-      0.85,
-      2.22,
-      f'{facts["p_week0_share_ge_70"]:.0%}\nmostly immediate',
-      ha='center',
-      va='top',
-      fontsize=9,
-      fontweight='bold',
-  )
-
-
-def plot_robyn_theta_comparison(ax) -> None:
-  """Slide 4 inset -- Robyn bounds decay per channel type; Meridian does not."""
-  labels = list(ROBYN_THETA_BOUNDS) + ['Meridian default\n(every channel)']
-  bounds = list(ROBYN_THETA_BOUNDS.values()) + [(ALPHA_M_LOW, ALPHA_M_HIGH)]
-  colors = list(ACCENT_COLORS) + [TODAY_COLOR]
-
-  for i, ((low, high), color) in enumerate(zip(bounds, colors)):
-    ax.barh(i, high - low, left=low, color=color, alpha=0.85, height=0.55)
-    ax.text(high + 0.02, i, f'[{low:g}, {high:g}]', va='center', fontsize=9)
-
-  ax.set_yticks(range(len(labels)))
-  ax.set_yticklabels(labels, fontsize=9)
-  ax.invert_yaxis()
-  ax.set_xlim(0, 1.15)
-  ax.set_xlabel('Carryover / decay rate')
-  ax.set_title(
-      'Robyn bounds decay by channel type; Meridian uses one range for all',
-      fontsize=11,
-  )
 
 
 def apply_slide_style() -> None:

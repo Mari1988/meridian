@@ -22,6 +22,14 @@ from meridian.model import spec
 from data_simulator import GeoMediaDataSimulator
 
 
+# `spec.py:237` -- Meridian's real `ModelSpec.max_lag` default, distinct from
+# `SimulationConfig.max_lag` (the DGP's own carryover window, often widened
+# beyond 8 so the ground truth isn't itself truncated). Pass this to
+# `build_model_spec`'s `max_lag` when a variant should get the out-of-the-box
+# window rather than matching the DGP's.
+MERIDIAN_DEFAULT_MAX_LAG = spec.ModelSpec().max_lag
+
+
 def build_input_data(
     df: pd.DataFrame,
     channel_names: list[str],
@@ -167,6 +175,7 @@ def build_reach_based_ec_prior(
     audience_noise_scale: float = 0.0,
     base_scale: float = 0.1,
     rng=None,
+    fixed_offset: float | None = None,
 ) -> tfp.distributions.Distribution:
   """LogNormal `ec_m` prior centered on the audience/frequency-derived value.
 
@@ -197,12 +206,35 @@ def build_reach_based_ec_prior(
     rng: `np.random.Generator` for the perturbation draw. Defaults to a
       fresh, unseeded generator if `audience_noise_scale > 0` and no `rng`
       is given.
+    fixed_offset: If given, overrides `audience_noise_scale`'s draw with a
+      BOUNDED mis-specification: the anchor is multiplied by exactly
+      `1 + fixed_offset` or `1 - fixed_offset`, sign drawn per channel from
+      `rng`. Use when the claim being tested is "even if the planning
+      assumption is off by X, recovery holds" -- `audience_noise_scale`
+      alone cannot support that, since a lognormal's tails put roughly half
+      its draws outside +-X. The prior's `scale` still comes from
+      `audience_noise_scale`, so the advertiser states the same uncertainty
+      and merely happens to be wrong by exactly that much.
 
   Returns:
     A batched `LogNormal` distribution over `ec_m`.
   """
   assumed_ec_m = sim.ec_m.numpy()
-  if audience_noise_scale:
+  if fixed_offset is not None:
+    # A BOUNDED mis-specification: every anchor is wrong by exactly
+    # `fixed_offset`, sign drawn per channel. `LogNormal(0, sigma)` has
+    # unbounded tails -- at sigma=0.25 half its draws land outside +-25% --
+    # so a claim of the form "even if you are off by 25%, recovery holds"
+    # cannot be tested with it. This makes the statement literally true, and
+    # tests the WORST case inside the bound rather than the typical one (a
+    # distribution merely truncated to +-25% leaves the median anchor off by
+    # only ~10%, which would not test the claim at all).
+    rng = rng or np.random.default_rng()
+    signs = rng.choice([1.0, -1.0], size=assumed_ec_m.shape)
+    assumed_ec_m = assumed_ec_m * np.where(
+        signs > 0, 1.0 + fixed_offset, 1.0 - fixed_offset
+    )
+  elif audience_noise_scale:
     rng = rng or np.random.default_rng()
     assumed_ec_m = assumed_ec_m * rng.lognormal(
         mean=0.0, sigma=audience_noise_scale, size=assumed_ec_m.shape
@@ -217,9 +249,14 @@ def build_reach_based_ec_prior(
 
 
 def build_alpha_prior(
-    sim, config, base_scale: float | dict[str, float] = 0.1
+    sim,
+    config,
+    base_scale: float | dict[str, float] = 0.1,
+    benchmark_noise_scale: float = 0.0,
+    rng=None,
+    fixed_offset: float | None = None,
 ) -> tfp.distributions.Distribution:
-  """TruncatedNormal `alpha_m` prior centered on the ground-truth `sim.alpha_m`.
+  """TruncatedNormal `alpha_m` prior anchored on the ground-truth `sim.alpha_m`.
 
   Analogous to `build_reach_based_ec_prior` but bounded to `[0, 1]` since
   `alpha_m` is a retention rate rather than a `LogNormal`-suited positive
@@ -229,15 +266,33 @@ def build_alpha_prior(
   certainty -- `base_scale` is the residual uncertainty around that
   benchmark.
 
+  With `benchmark_noise_scale=0.0` (the default) the prior is *centered* on
+  the truth, which is an oracle no advertiser could supply: it is unbiased by
+  construction, so a study using it can only show that a correctly-centered
+  prior helps -- not that an achievable one does. Setting it > 0 moves the
+  centre off the truth first, mirroring `build_reach_based_ec_prior`'s
+  `audience_noise_scale`, and widens `scale` to match so a wronger anchor also
+  yields an appropriately less confident prior.
+
   Args:
     sim: A simulated `GeoMediaDataSimulator` (post `simulate_adstock_hill_
       params()`).
     config: The `SimulationConfig` used to build `sim`.
     base_scale: Standard deviation of the truncated normal around each
-      channel's true `alpha_m`. Either one value applied to every channel, or
-      a `{channel_name: scale}` dict to tighten/loosen individual channels
+      channel's assumed `alpha_m`. Either one value applied to every channel,
+      or a `{channel_name: scale}` dict to tighten/loosen individual channels
       (e.g. for pressure-testing whether a channel's poor `alpha_m` recovery
       is a weak-prior issue or a likelihood/identifiability issue).
+    benchmark_noise_scale: If > 0, the assumed `alpha_m` used to centre the
+      prior is multiplicatively perturbed by `LogNormal(0,
+      benchmark_noise_scale)` before use -- the advertiser's category
+      benchmark being approximately, not exactly, right. Multiplicative
+      rather than additive so the perturbation cannot push a small decay
+      negative, and so it is scale-free the way the `ec_m` treatment is. The
+      result is clipped into `[1e-4, 0.99]` to stay inside the support.
+    rng: `np.random.Generator` for the perturbation draw. Defaults to a
+      fresh, unseeded generator if `benchmark_noise_scale > 0` and no `rng`
+      is given. Pass a seeded one for reproducible runs.
 
   Returns:
     A batched `TruncatedNormal` distribution over `alpha_m`, bounded to
@@ -245,12 +300,39 @@ def build_alpha_prior(
   """
   assumed_alpha_m = sim.alpha_m.numpy()
   if isinstance(base_scale, dict):
-    scales = [base_scale[ch] for ch in config.channel_names]
+    scales = np.array([base_scale[ch] for ch in config.channel_names])
   else:
-    scales = [base_scale] * config.n_imp_channels
+    scales = np.full(config.n_imp_channels, float(base_scale))
+
+  if fixed_offset is not None:
+    # Bounded counterpart of the draw below -- see `build_reach_based_ec_
+    # prior`'s `fixed_offset`. Still clipped to the support, but at a true
+    # `alpha_m` of 0.3 a +25% offset reaches only 0.375, so the clip is
+    # inactive here and the offset is exactly +-25% as advertised.
+    generator = rng if rng is not None else np.random.default_rng()
+    signs = generator.choice([1.0, -1.0], size=len(assumed_alpha_m))
+    assumed_alpha_m = np.clip(
+        assumed_alpha_m
+        * np.where(signs > 0, 1.0 + fixed_offset, 1.0 - fixed_offset),
+        1e-4,
+        0.99,
+    )
+    scales = np.sqrt(scales**2 + (benchmark_noise_scale * assumed_alpha_m) ** 2)
+  elif benchmark_noise_scale > 0:
+    generator = rng if rng is not None else np.random.default_rng()
+    perturbation = generator.lognormal(
+        mean=0.0, sigma=benchmark_noise_scale, size=len(assumed_alpha_m)
+    )
+    assumed_alpha_m = np.clip(assumed_alpha_m * perturbation, 1e-4, 0.99)
+    # Same sqrt-sum-of-squares combination `build_reach_based_ec_prior` uses:
+    # the benchmark's own error and the residual uncertainty around it are
+    # treated as independent sources. Applied on alpha's own scale, since
+    # this prior is Normal rather than LogNormal.
+    scales = np.sqrt(scales**2 + (benchmark_noise_scale * assumed_alpha_m) ** 2)
+
   return tfp.distributions.TruncatedNormal(
       loc=[float(x) for x in assumed_alpha_m],
-      scale=scales,
+      scale=[float(x) for x in scales],
       low=0.0,
       high=1.0,
       name=constants.ALPHA_M,
@@ -397,6 +479,77 @@ PRIOR_VARIANTS = {
             alpha_m=build_alpha_prior(sim, config),
         )
     ),
+    # `ec_alpha_only`'s achievable counterpart, and the one to prefer for any
+    # headline claim. `ec_alpha_only` centres both priors on the exact truth,
+    # which no advertiser can do: it is unbiased by construction, so beating
+    # the default with it shows only that a correctly-centred prior wins.
+    # This perturbs both anchors first -- the audience/reach assumption behind
+    # `ec_m` and the category benchmark behind `alpha_m` -- so what is being
+    # tested is a prior a media team could actually supply. Pass a seeded
+    # `rng` to make the mis-specification reproducible.
+    'ec_alpha_noisy': (
+        lambda sim, config, rng=None: prior_distribution.PriorDistribution(
+            ec_m=build_reach_based_ec_prior(
+                sim, config, audience_noise_scale=0.25, rng=rng
+            ),
+            alpha_m=build_alpha_prior(
+                sim, config, benchmark_noise_scale=0.25, rng=rng
+            ),
+        )
+    ),
+    # `ec_alpha_noisy`'s BOUNDED counterpart: every anchor is off by exactly
+    # 25%, sign per channel, instead of being drawn from a lognormal whose
+    # tails run past +-40%. Supports the specific claim "even if your
+    # planning assumption is off by 25%, recovery holds" -- which the
+    # unbounded variant cannot, since half its draws are off by more than
+    # that. The stated uncertainty (and hence each prior's `scale`) is
+    # unchanged at 0.25, so only the anchor's error is bounded.
+    'ec_alpha_bounded25': (
+        lambda sim, config, rng=None: prior_distribution.PriorDistribution(
+            ec_m=build_reach_based_ec_prior(
+                sim, config, audience_noise_scale=0.25, rng=rng,
+                fixed_offset=0.25,
+            ),
+            alpha_m=build_alpha_prior(
+                sim, config, benchmark_noise_scale=0.25, rng=rng,
+                fixed_offset=0.25,
+            ),
+        )
+    ),
+    # ANCHOR EXACT, CONFIDENCE UNCHANGED. Splits the two things
+    # `ec_alpha_noisy` moves at once: it perturbs the anchor AND widens the
+    # scale, so its spread cannot be attributed to either. Here the `ec_m`
+    # anchor sits exactly on the truth while the scale stays at
+    # `ec_alpha_noisy`'s -- `fixed_offset=0.0` multiplies the anchor by
+    # exactly 1.0 (see `build_reach_based_ec_prior`) while
+    # `audience_noise_scale` still feeds `prior_scale`. So this arm answers
+    # "how much of the informed arm's spread survives a perfect anchor?".
+    #
+    # It is NOT a claim about achievable priors -- an exact anchor is an
+    # oracle, the same objection that retired `ec_alpha_only`. Read it as a
+    # decomposition of `ec_alpha_noisy`, never as a headline result.
+    #
+    # `alpha_m` is deliberately NOT anchored: `build_alpha_range_prior` never
+    # reads `sim.alpha_m`, so this is a plausible BOUND rather than a
+    # benchmark centred on the answer. `(0, 0.5)` leaves both pinned truths
+    # interior (Channel-1 0.30, Channel-2 0.15) -- a `(0, 0.3)` bound would
+    # sit exactly on Channel-1's truth and censor its posterior, which
+    # currently lands at or above 0.30 in 6 of 10 seeds, forcing a negative
+    # bias that is an artifact of the bound. It is still a real restriction
+    # against Meridian's out-of-the-box `Uniform(0, 1)`, and its mean (0.25)
+    # is not either channel's truth.
+    'ec_centred25_alpha_u05': (
+        lambda sim, config, rng=None: prior_distribution.PriorDistribution(
+            ec_m=build_reach_based_ec_prior(
+                sim, config, audience_noise_scale=0.25, rng=rng,
+                fixed_offset=0.0,
+            ),
+            alpha_m=build_alpha_range_prior(
+                config,
+                {ch: (0.0, 0.5) for ch in config.channel_names},
+            ),
+        )
+    ),
     # Pressure test for `ec_alpha_only`'s poor `alpha_m[Social]` recovery:
     # tightens just Social's `alpha_m` prior scale (0.1 -> 0.03, roughly a
     # 90% CI of [0.32, 0.44] around the true 0.379) while leaving TV/Display
@@ -487,6 +640,7 @@ def build_model_spec(
     media_prior_type: str = 'roi',
     knots: int | None = 8,
     enable_aks: bool = False,
+    max_lag: int | None = None,
 ) -> spec.ModelSpec:
   """Builds a `ModelSpec` for one of `PRIOR_VARIANTS`'s keys.
 
@@ -516,12 +670,22 @@ def build_model_spec(
     enable_aks: `ModelSpec.enable_aks` -- use Meridian's Automatic Knot
       Selection instead of a fixed `knots` count. Mutually exclusive with
       `knots` (Meridian requires `knots=None` when this is `True`).
+    max_lag: `ModelSpec.max_lag` override. `None` (the default) uses
+      `config.max_lag` -- the same window the DGP used to generate the
+      truth, so the fit isn't handicapped by a mismatched window unless a
+      caller deliberately asks for one. Pass an explicit value (e.g.
+      Meridian's real default of `8`, when `config.max_lag` is wider) to
+      fit a *different* window than the truth used -- e.g. `default` getting
+      the out-of-the-box `max_lag=8` a practitioner who never touches it
+      would actually get, contrasted against an informed variant that also
+      gets the wider window an advertiser who knows a channel's carryover
+      would choose.
   """
   prior = PRIOR_VARIANTS[variant](sim, config, rng)
   kwargs = dict(
       media_prior_type=media_prior_type,
       media_effects_dist='log_normal',
-      max_lag=config.max_lag,
+      max_lag=config.max_lag if max_lag is None else max_lag,
   )
   if enable_aks:
     kwargs['enable_aks'] = True
