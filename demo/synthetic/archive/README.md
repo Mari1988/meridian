@@ -1,5 +1,24 @@
 # Archived exploration — superseded, do not quote
 
+> **The notebooks themselves were removed on 2026-08-04.** Seventeen `.ipynb`
+> files (3.8MB) that recorded the study's dead ends. Fourteen of them fit with
+> `media_prior_type='coefficient'`, so their numbers contradict the delivered
+> deck's — leaving them browsable in a public repo was an invitation to quote
+> them by accident.
+>
+> **They are still in git history and fully recoverable.** The last commit that
+> contained them is `fe929e4`:
+>
+> ```sh
+> git show fe929e4 --stat -- demo/synthetic/archive/          # what was there
+> git checkout fe929e4 -- demo/synthetic/archive/             # restore all of it
+> ```
+>
+> This file — the record of *what* each one was and *why* it was superseded —
+> is the part worth keeping, and it stays. So does
+> `data_simulator_v1_complex.py`, which the current `data_simulator.py` cites,
+> and `real_world_simulated_geo_data.csv`.
+
 Everything in this directory is **superseded**. It is kept for provenance: it
 records how the study arrived at its conclusions and what was ruled out along
 the way, which is what answers "how did you rule that out?" in Q&A. None of it
