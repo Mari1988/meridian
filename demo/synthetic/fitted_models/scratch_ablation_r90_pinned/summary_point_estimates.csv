@@ -1,0 +1,7 @@
+channel,param,true,default,default_range,informed,informed_range
+TV,Half-saturation,9.0,2.91,2.18-3.97,9.06,4.25-12.85
+TV,ROI,6.64,9.31,6.84-10.73,8.01,5.93-9.28
+TV,Adstock,0.3,0.35,0.26-0.42,0.34,0.27-0.42
+Display,Half-saturation,1.3,1.4,0.87-1.85,1.35,0.98-1.94
+Display,ROI,6.02,5.86,3.97-7.44,6.04,4.33-7.24
+Display,Adstock,0.15,0.15,0.04-0.26,0.16,0.07-0.28

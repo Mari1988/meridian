@@ -1,0 +1,2 @@
+seed,basis,realism,informed_variant,target_oracle_r2,achieved_oracle_r2,noise_scale,media_share_pct,true_alpha_m,true_roi_m,default_ec_m_anchor,default_alpha_m_anchor,default_ec_err,default_roi_err,default_alpha_err,default_alpha_pp,informed_ec_m_anchor,informed_alpha_m_anchor,informed_ec_err,informed_roi_err,informed_alpha_err,informed_alpha_pp
+99,alpha03,wellspec,ec_centred25_alpha_u05,0.9,0.9001,2.28994,33.2,0.3,6.64,0.8,,-64.9,24.3,4.5,1.34,9.0,,-2.8,10.3,7.3,2.2

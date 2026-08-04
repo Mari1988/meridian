@@ -1,0 +1,2 @@
+seed,achieved_oracle_r2,noise_scale,media_share_pct,true_roi_m,default_ec_err,default_roi_err,default_alpha_err,informed_ec_err,informed_roi_err,informed_alpha_err,informed_variant
+38578,0.9001,2.30238,31.1,6.64,-66.9,21.4,3.4,14.6,4.6,4.6,ec_alpha_noisy

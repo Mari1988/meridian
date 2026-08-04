@@ -1,0 +1,2 @@
+seed,oracle_r2,media_share_pct,clipped_frac_pct,true_roi_m,default_ec_m,default_ec_err,default_roi_m,default_roi_err,default_alpha_err,ec_alpha_only_ec_m,ec_alpha_only_ec_err,ec_alpha_only_roi_m,ec_alpha_only_roi_err,ec_alpha_only_alpha_err
+7,0.8001,35.7,1.19,12.61,0.974,-89.2,19.397,53.8,-12.8,8.581,-4.7,11.822,-6.2,-15.3

@@ -1,0 +1,13 @@
+channel,param,true,variant,fitted,err_pct,hdi,width_x_true,mark
+TV,alpha_m,0.8,default,0.787,-1.6,0.72-0.85,0.16,✓
+TV,alpha_m,0.8,ec_alpha_only,0.691,-13.6,0.63-0.74,0.14,✗
+TV,ec_m,9.0,default,0.914,-89.8,0.44-1.43,0.11,✗
+TV,ec_m,9.0,ec_alpha_only,8.926,-0.8,7.46-10.28,0.31,✓
+TV,roi_m,7.642,default,15.221,99.2,11.29-18.99,1.01,✗
+TV,roi_m,7.642,ec_alpha_only,7.756,1.5,6.37-9.2,0.37,✓
+Display,alpha_m,0.156,default,0.171,9.6,0.09-0.24,0.96,✓
+Display,alpha_m,0.156,ec_alpha_only,0.206,32.1,0.13-0.28,0.96,✓
+Display,ec_m,1.292,default,0.73,-43.5,0.39-1.05,0.51,✗
+Display,ec_m,1.292,ec_alpha_only,1.219,-5.7,1.03-1.39,0.28,✓
+Display,roi_m,5.234,default,6.713,28.3,5.07-8.38,0.63,✓
+Display,roi_m,5.234,ec_alpha_only,5.982,14.3,5.08-6.82,0.33,✓

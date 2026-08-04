@@ -1,0 +1,7 @@
+metric,variant,median,min,max,spread,sd,seed_1320,n
+TV ec_m error %,default,-86.25,-89.8,-65.8,24.0,9.55,-89.8,10
+TV ec_m error %,ec_alpha_only,-0.5,-4.7,3.1,7.8,2.4,-0.8,10
+TV alpha_m error %,default,-0.1,-22.2,13.7,35.9,11.89,-1.7,10
+TV alpha_m error %,ec_alpha_only,-6.3,-20.9,9.0,29.9,11.49,-13.6,10
+TV roi_m error %,default,78.45,-9.1,160.1,169.2,46.94,99.2,10
+TV roi_m error %,ec_alpha_only,13.65,-27.7,78.6,106.3,34.54,1.5,10
