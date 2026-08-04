@@ -1,8 +1,22 @@
 # ARF Analytics Council talk — outline
 
-**Status:** 8 slides built in `demo/synthetic/arf_section1_deck.pptx` — §2's four
-assumption slides plus four results slides. Sections 1, 3, 4, 6, 7, 8 of this outline are
-still unbuilt. Update this file as the talk gets prepared/delivered.
+**Status: DELIVERED 2026-08-04.** The talk was given from
+`ARF-Analytics-Council-Talk-v2.pptx` — twelve slides, in the author's OneDrive, **not in
+this repo**. It is built by `demo/synthetic/arf_deck/` (slides 8-12) off the
+**well-specified arm at 50 draws**, `fitted_models/scratch_ablation_r90_wellspec/`.
+CLAUDE.md's "THE LANDED STATE" block is the authority on settings, scripts and objects;
+read it before anything below.
+
+Slides 1-6 (defaults, DGP, execution-vs-curve) come from the earlier eight-slide
+`demo/synthetic/arf_section1_deck.pptx` pipeline. Slides 7-12 are the results and the
+appendix. Sections 1, 3, 4, 6, 7, 8 of the outline below were never built as slides.
+
+**Two things changed between the last outline update and delivery, and both matter:**
+(1) the results section moved from the realistic baseline to the **well-specified** one,
+so every ROI number below that is labelled "realistic" is no longer what was shown;
+(2) the sweep went from 10 draws to 50, which **retracted** the Channel-2 `alpha_m`/ROI
+miss recorded below as a small-sample artifact. Everything below this block predates
+delivery and is kept for provenance.
 
 **Changes on 2026-08-02 — a SECOND arm, not a replacement. The deck still renders from
 the realistic-baseline run described below; nothing here supersedes it.**

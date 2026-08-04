@@ -75,12 +75,80 @@ All model/analysis code must go through `meridian.backend` (imported as `backend
 
 An ongoing investigation into whether Meridian's default `ec_m` (Hill half-saturation) prior — `TruncatedNormal(0.8, 0.8, [0.1, 10])`, identical for every channel (`meridian/model/prior_distribution.py`) — systematically misdiagnoses under-invested channels as already-near-saturated, and whether a reach/frequency-informed prior fixes it. Uses a from-scratch synthetic geo x time data-generating process with fully known ground truth (not real client data), so a fitted Meridian model's posterior can be checked against the exact parameters used to generate the data, rather than against an unknowable real-world truth.
 
+#### THE LANDED STATE — read this before anything else in this section
+
+The ARF Analytics Council talk was **delivered 2026-08-04**. Everything below
+this block is background, provenance, or superseded; this is what the delivered
+deck actually rests on, and where follow-up work should start.
+
+**Configuration.** Well-specified baseline
+(`realistic_baseline.RealisticBaselineConfig(mu_ar1_sd=0.0, seasonal_amplitude=0.0)`
+— `mu_t` is a linear trend the 8-knot spline spans exactly, with the noise
+recalibrated so oracle R² stays at 0.9), basis `r90_basis.ALPHA03` (Channel-1
+`ec_m` 9.0 / `alpha_m` 0.30 / `roi_m` 6.6405; Channel-2 1.3 / 0.15 / 6.0237, all
+pinned and asserted on every `build_scenario()` call), **50 draws**
+(`r90_basis.SEEDS_50`, whose first ten are `SEEDS` so it is a strict superset of
+the old 10-draw results and comparable draw-for-draw). Two arms: `default`
+(Meridian out of the box, `max_lag=8`) vs `ec_alpha_noisy` (both anchors
+perturbed ~25% per seed, `max_lag=13`). Sampler
+`n_chains=2, n_adapt=500, n_burnin=500, n_keep=1000, seed=1`.
+
+**Reproduce it** (nothing here is a notebook — see below):
+
+```sh
+demo/synthetic/run_wellspec_50.sh          # ~90 min, 100 fits, 10 seeds per process
+demo/synthetic/run_wellspec_mroi_50.sh     # ~2 h, NO MCMC: rebuilds scenarios, reattaches posteriors
+.venv/bin/python demo/synthetic/scratch_extract_r90_wellspec_ch2.py   # Channel-2 recovery, seconds
+```
+
+**Objects.** `fitted_models/scratch_ablation_r90_wellspec/` holds
+`per_seed_all.csv` (Channel-1), `per_seed_all_ch2.csv` (Channel-2),
+`mroi_both_channels.csv` and `true_params_by_seed.csv` — **these are tracked in
+git**, so every figure and every assertion rebuilds without re-fitting. The 100
+`.nc` posteriors under `models/` (~273MB) are **not** tracked; regenerate from
+the script above.
+
+**Figures and deck.**
+
+```sh
+.venv/bin/python demo/synthetic/scratch_plot_wellspec_recovery.py \
+    --run-dir=demo/synthetic/fitted_models/scratch_ablation_r90_wellspec \
+    --out-prefix=wellspec_slide7 --no-header        # -> figures/wellspec_slide7_ch{1,2}.png
+.venv/bin/python demo/synthetic/scratch_plot_mroi_r90_slide8_pinned.py \
+    --run-dir=demo/synthetic/fitted_models/scratch_ablation_r90_wellspec \
+    --out=demo/synthetic/figures/wellspec_mroi_50.png \
+    --informed=ec_alpha_noisy                       # --band=90 for the 90% variant
+```
+
+`demo/synthetic/arf_deck/` builds slides 8–12 and reads every number from those
+CSVs at build time. **The delivered `.pptx` is not in this repo** — it lives in
+the author's OneDrive as `ARF-Analytics-Council-Talk-v2.pptx` (12 slides). The
+`arf_section1_deck.pptx` that *is* in this repo is the earlier 8-slide Section-1
+deck, a different artifact.
+
+**Headline numbers, Channel-1 at 50 draws.** `ec_m` default −65.4%
+[−70.9, −59.1], low on all 50; informed −0.1% [−37, +76], closer on 48/50 —
+centred, **not** precise. `roi_m` +14.2% → +0.8% (41/50). `alpha_m` +0.6% vs
+−0.2%, informed winning 18/50, i.e. indistinguishable. mROI −5.8% at 1x →
+−61.6% at 10x, with the default's 90% interval missing the truth on 49/50
+datasets at 2x and 50/50 from 3x upward. Channel-2 is clean throughout — that
+contrast is the argument.
+
+**What is NOT the landed state, and trips people up.** *No notebook reproduces
+any of this* — the deck came from scripts, and every notebook in this directory
+is on a superseded basis (realistic baseline, or `alpha_m=0.8`/`oracle_r2=0.80`,
+or the 10-draw pinned run). `scratch_ablation_r90_pinned/` backed the earlier
+10-draw version of the deck and is kept only so those figures stay rebuildable.
+Anything in `archive/` is exploratory and must not be quoted.
+
 - `data_simulator.py` — `GeoMediaDataSimulator`/`SimulationConfig`: builds geo x time media/KPI data end-to-end (real U.S. state populations, reach x frequency media execution with seasonality/flighting/AR(1) noise, adstock + Hill transforms via Meridian's own `meridian.model.adstock_hill` classes, per-channel ROI calibration). `simulate_adstock_hill_params()` derives the ground-truth `ec_m` from a stated "half of target audience reached at the channel's mean frequency" assumption. **This is a stylized modeling choice for generating a self-consistent ground truth, not a claim about real-world half-saturation** — every "true `ec_m`" reference in the notebooks below means "true under this stated assumption," not an externally validated threshold. The `roi_ec_elasticity` / `roi_alpha_elasticity` config fields optionally tie a channel's true `roi_m` to its curve shape (faster-saturating channels convert better per exposure) rather than assigning ROI as an independent assumption; `saturation_frequency` moves `ec_m` linearly while leaving media execution untouched, which is what makes controlled single-variable comparisons possible.
 - `model_utils.py` — helpers shared by the notebooks below: `build_simulated_input` / `build_real_augmented_input` (run the full simulator pipeline, the latter scaling it onto the real `geo_media_rf.csv` demo data); `build_reach_based_ec_prior` / `build_alpha_prior` / `PRIOR_VARIANTS` / `build_model_spec` (construct the `default` / `ec_only` / `ec_noisy` / `ec_alpha_only` / `ec_alpha_social_tight` prior variants — `ec_noisy`'s prior `scale` grows with its `audience_noise_scale` uncertainty rather than staying fixed, so a noisier audience/reach assumption yields an appropriately less confident prior); `build_comparison_table` (true-vs-fitted recovery table with HDI coverage marks); and Hill-curve diagnostics (`hill_value`, `ceiling_fraction_at_median`, `posterior_param_mean`).
 
-**Which notebook to read — this ordering matters, several are superseded:**
+**Which notebook to read — this ordering matters, and NONE of them backs the
+delivered deck (see the landed-state block above; the deck came from scripts).
+Read these for provenance and for the side-results they alone carry:**
 
-- `realistic-baseline-noise-2ch.ipynb` + `realistic-baseline-noise-2ch-seeds.ipynb` — **the current results, and what the ARF deck is built from.** These supersede the landed notebook wherever the two disagree, because the landed DGP flattered the model in two ways since corrected: its baseline was drawn from the model's own spline basis (`n_knots_mu_t=8` against a fitted `knots=8`, so exactly recoverable) and its residual was iid, giving an unrealistic R² of 0.996. The realistic DGP (`realistic_baseline.py`) uses a baseline the fitted spline structurally cannot represent plus persistent, cross-geo-correlated noise, calibrated to an *oracle R²* of 0.80 — the ceiling for Meridian's mean structure given true media, which is the metric to quote rather than `1 - var(eps)/var(kpi)`. **`max_lag` is now informed the same way `ec_m`/`alpha_m` are, not held fixed across variants:** `default` fits at Meridian's real out-of-the-box `max_lag` (8, `model_utils.MERIDIAN_DEFAULT_MAX_LAG`), `ec_alpha_only` (informed) fits at the DGP's own window (`config.max_lag`, 13) — see `MAX_LAG_BY_VARIANT` in `export_curve_data.py` / `seed_sweep_worker.py`. TV `ec_m` −89.8% under `default` vs −0.8% informed (seed 1320); across ten draws `default` ranges −89.8 to −65.8%, informed −4.7 to +3.1% — no overlap, 10/10 informed wins; the default's mROI credible band excludes the truth from 2x spend upward. **Three findings that only appear here:** (1) `alpha_m` recovery moves with `max_lag`, not with the `alpha_m` prior — under the old shared window both variants failed `alpha_m` alike (~−6.5% median, informed winning only 3/10 draws), but with `default` now truncated to `max_lag=8` its median `alpha_m` error moved to −0.10% (closer to truth than informed's −6.30%) while informed win-rate barely moved (4/10) — the window is a genuine, separate lever, independent of the prior, and does *not* mean `default`'s `alpha_m` handling is better (`ec_m`/`roi_m` are far worse on every draw); (2) ROI does not replicate cleanly (informed wins only 7/10 draws post-split, own error spans −27.7% to +78.6%); (3) a deeply saturated channel becomes confounded with the baseline when the baseline is misspecified (why Social was dropped; see `realistic-baseline-noise.ipynb` §6). A scratch single-seed check at true `alpha_m=0.3` (fast decay) found no `max_lag`-driven `alpha_m` movement, consistent with negligible true carryover past week 8 at that decay rate — not yet folded into a formal sweep. **Retired:** the `ec9`-vs-`ec11` invariance check (never read by `results_facts.py`) is no longer run in these two notebooks; the compute budget went to the `max_lag` split instead. The still-standing invariance result lives in `final/roi-vs-mroi-metric-selection.ipynb` §6 (below), on the superseded DGP.
+- `realistic-baseline-noise-2ch.ipynb` + `realistic-baseline-noise-2ch-seeds.ipynb` — **the interactive precursors to the scripted r90 arms. They backed the deck at an earlier stage and no longer do** (the delivered deck is the well-specified 50-draw run in the landed-state block above; where the two disagree, that block wins). They still supersede `final/roi-vs-mroi-metric-selection.ipynb` wherever those two disagree, because that notebook's DGP flattered the model in two ways since corrected: its baseline was drawn from the model's own spline basis (`n_knots_mu_t=8` against a fitted `knots=8`, so exactly recoverable) and its residual was iid, giving an unrealistic R² of 0.996. The realistic DGP (`realistic_baseline.py`) uses a baseline the fitted spline structurally cannot represent plus persistent, cross-geo-correlated noise, calibrated to an *oracle R²* of 0.80 — the ceiling for Meridian's mean structure given true media, which is the metric to quote rather than `1 - var(eps)/var(kpi)`. **`max_lag` is now informed the same way `ec_m`/`alpha_m` are, not held fixed across variants:** `default` fits at Meridian's real out-of-the-box `max_lag` (8, `model_utils.MERIDIAN_DEFAULT_MAX_LAG`), `ec_alpha_only` (informed) fits at the DGP's own window (`config.max_lag`, 13) — see `MAX_LAG_BY_VARIANT` in `export_curve_data.py` / `seed_sweep_worker.py`. TV `ec_m` −89.8% under `default` vs −0.8% informed (seed 1320); across ten draws `default` ranges −89.8 to −65.8%, informed −4.7 to +3.1% — no overlap, 10/10 informed wins; the default's mROI credible band excludes the truth from 2x spend upward. **Three findings that only appear here:** (1) `alpha_m` recovery moves with `max_lag`, not with the `alpha_m` prior — under the old shared window both variants failed `alpha_m` alike (~−6.5% median, informed winning only 3/10 draws), but with `default` now truncated to `max_lag=8` its median `alpha_m` error moved to −0.10% (closer to truth than informed's −6.30%) while informed win-rate barely moved (4/10) — the window is a genuine, separate lever, independent of the prior, and does *not* mean `default`'s `alpha_m` handling is better (`ec_m`/`roi_m` are far worse on every draw); (2) ROI does not replicate cleanly (informed wins only 7/10 draws post-split, own error spans −27.7% to +78.6%); (3) a deeply saturated channel becomes confounded with the baseline when the baseline is misspecified (why Social was dropped; see `realistic-baseline-noise.ipynb` §6). A scratch single-seed check at true `alpha_m=0.3` (fast decay) found no `max_lag`-driven `alpha_m` movement, consistent with negligible true carryover past week 8 at that decay rate — not yet folded into a formal sweep. **Retired:** the `ec9`-vs-`ec11` invariance check (never read by `results_facts.py`) is no longer run in these two notebooks; the compute budget went to the `max_lag` split instead. The still-standing invariance result lives in `final/roi-vs-mroi-metric-selection.ipynb` §6 (below), on the superseded DGP.
 - `final/roi-vs-mroi-metric-selection.ipynb` — **the landed result, and still the authority on metric *choice*; but its DGP is superseded, so prefer the realistic-baseline numbers above.** Establishes which metric exposes the default prior's failure and which conceals it: `ec_m` fails unambiguously while `roi_m` misses only narrowly, and mROI *at current spend* is the least discriminating metric of all (the ROI overstatement and elasticity understatement partly cancel). The sharp discriminator is mROI at elevated spend. Its strongest result is the **invariance check** in §6: two scenarios differing only in true `ec_m`, with bit-identical media execution, where the `default` posterior absorbs 7% of an 18.7% move in the truth and the informed prior 99% — i.e. the default is reporting its prior, not estimating the parameter.
 - `meridian_ec_prior_case_study.ipynb` — the narrow base case: fits `default` vs. `ec_only` on one simulated dataset, then repeats across 20 seeds reporting 90% HDI coverage of `ec_m`/`roi_m`. Still current; it is the study's calibration evidence.
 - `meridian_tv_underreach_case_study.ipynb` — a sharper scenario built on the same `ec_m` definition: a TV channel with a large target audience but deliberately low current reach *and* low frequency (two independent, compounding forms of under-delivery), so current execution sits far below the DGP's saturation threshold. Adds a "fraction of ceiling effect captured today" headline diagnostic, a response-curve overlay, a `BudgetOptimizer`-vs-true-DGP-optimal budget-reallocation comparison, and a robustness check (`ec_noisy`) showing the reach-informed prior doesn't need to be exact to outperform default. Still current, but its figures come from **reduced-precision smoke-test MCMC settings** — re-run at full settings before quoting.
@@ -91,6 +159,13 @@ An ongoing investigation into whether Meridian's default `ec_m` (Hill half-satur
 - `ARF_COUNCIL_TALK_OUTLINE.md` (repo root) — outline for presenting these findings to the ARF Analytics Council (session: Tue Aug 4, 2026). It is the authority on which numbers are current and which are superseded; update as the talk is prepared/delivered.
 
 ### The ARF deck: `demo/synthetic/arf_section1_deck.pptx`
+
+**This is the earlier eight-slide Section-1 deck, NOT the one delivered on
+2026-08-04.** The delivered deck is twelve slides, lives in the author's
+OneDrive, and is built by `demo/synthetic/arf_deck/` off the well-specified
+50-draw run — see the landed-state block above. Everything in this section
+describes the Section-1 artifact and the 10-draw pinned basis it renders from,
+which is still the authority for slides 1-6 (the defaults and the DGP).
 
 Ten slides, all generated — **never hand-edit the `.pptx`**, it is overwritten on every
 build. Slides 1–4 cover Meridian's defaults; slides 5–9 the results. The adstock slide
